@@ -22,6 +22,7 @@ from anamnesis.local_runtime import (
     LOCAL_OLLAMA_PARAMETER_SIZE,
     LOCAL_OLLAMA_QUANTIZATION,
     LOCAL_OLLAMA_SERVICE_MODEL,
+    LOCAL_STRUCTURED_MEMORY_PRECEDENCE,
     LOCAL_ZERO_MODEL_COST,
     LocalDecisionWire,
     LocalLoadedModelAttestation,
@@ -34,6 +35,8 @@ from anamnesis.local_runtime import (
     _verify_local_ollama_runtime,
     build_local_decision_prompt,
     local_decision_contract,
+    local_decision_prompt_contract,
+    local_decision_schema_contract,
     local_scenario_solver,
     local_system_config_sha256,
     run_local_model_preflight,
@@ -49,6 +52,8 @@ from anamnesis.oracle import (
 from anamnesis.runner import DecisionCall, DecisionRequest, run_scenario
 from anamnesis.schema import (
     Decision,
+    MemoryView,
+    MemoryViewBlock,
     ObservableEvent,
     RuntimeScenario,
     Usage,
@@ -122,7 +127,7 @@ def test_local_decision_discriminator_rejects_inconsistent_actions() -> None:
         LocalDecisionWire.model_validate({"mode": "emit", "actions": []})
 
 
-def test_local_decision_prompt_replaces_only_the_wire_contract() -> None:
+def test_local_decision_prompt_uses_local_wire_and_shared_d1_contract() -> None:
     event = ObservableEvent(
         id="event-1",
         at="2026-01-05T09:00:00+00:00",
@@ -143,7 +148,135 @@ def test_local_decision_prompt_replaces_only_the_wire_contract() -> None:
     assert "Omit every unused optional payload slot" in prompt
     assert event.text in prompt
     assert "supersedes" not in prompt
+    assert LOCAL_STRUCTURED_MEMORY_PRECEDENCE in prompt
+    assert "- (not provided by this system)" in prompt
     assert local_decision_contract() == local_decision_contract()
+
+
+def test_local_decision_d1_rules_are_exact_for_absent_and_empty_views() -> None:
+    expected_rules = (
+        "Structured-memory precedence (D1):\n"
+        "- When Structured memory view is provided by this system, it is "
+        "authoritative.\n"
+        "- If it contains zero DUE_CANDIDATE blocks, set mode=no_action with an "
+        "empty actions array regardless of wording in Available context.\n"
+        "- For each DUE_CANDIDATE block, emit exactly one action and copy kind, "
+        "action_key, payload, and summary value-for-value from that block's JSON.\n"
+        "- Set evidence_event_ids to exactly the block's evidence IDs in displayed "
+        "order, followed by Current decision event if it is not already present; "
+        "include no other IDs.\n"
+        "- A prior EXECUTION suppresses only a DUE_CANDIDATE with the same "
+        "occurrence_id. A different occurrence_id or date is a distinct recurring "
+        "occurrence even when action_key is the same.\n"
+        "- When Structured memory view is not provided by this system, use the "
+        "general Rules above.\n"
+    )
+    assert expected_rules == LOCAL_STRUCTURED_MEMORY_PRECEDENCE
+
+    event = ObservableEvent(
+        id="checkpoint-1",
+        at="2026-01-05T17:00:00+00:00",
+        kind="clock_tick",
+        text="Decision checkpoint.",
+    )
+    common = {
+        "now": event.at.isoformat(),
+        "current_event_id": event.id,
+        "context_events": [event],
+        "decision_history": [],
+    }
+    absent_prompt = build_local_decision_prompt(memory_view=None, **common)
+    empty_prompt = build_local_decision_prompt(memory_view=MemoryView(), **common)
+
+    assert expected_rules in absent_prompt
+    assert expected_rules in empty_prompt
+    assert "- (not provided by this system)" in absent_prompt
+    assert "- (empty; no structured candidate is due)" in empty_prompt
+
+
+def test_local_decision_d1_renders_due_and_execution_occurrences_exactly() -> None:
+    event = ObservableEvent(
+        id="checkpoint-2",
+        at="2026-01-06T17:00:00+00:00",
+        kind="clock_tick",
+        text="Decision checkpoint.",
+    )
+    due_content = (
+        '{"action_key":"request-1","due_at":"2026-01-06T17:00:00+00:00",'
+        '"intent_id":"daily-request","kind":"reminder",'
+        '"occurrence_id":"daily-request:2026-01-06",'
+        '"payload":{"date":"2026-01-06","subject":"check the report"},'
+        '"summary":"Check the report."}'
+    )
+    execution_content = (
+        '{"emitted_at":"2026-01-05T17:00:00+00:00",'
+        '"occurrence_id":"daily-request:2026-01-05",'
+        '"payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+    )
+    memory_view = MemoryView(
+        blocks=[
+            MemoryViewBlock(
+                kind="due_candidate",
+                title="Due reminder: Check the report.",
+                content=due_content,
+                evidence_event_ids=["request-1", "update-1"],
+            ),
+            MemoryViewBlock(
+                kind="execution",
+                title="Prior execution: request-1",
+                content=execution_content,
+                evidence_event_ids=["request-1", "checkpoint-1"],
+            ),
+        ]
+    )
+
+    prompt = build_local_decision_prompt(
+        now=event.at.isoformat(),
+        current_event_id=event.id,
+        context_events=[event],
+        decision_history=[],
+        memory_view=memory_view,
+    )
+
+    assert (
+        "- DUE_CANDIDATE | Due reminder: Check the report. | "
+        f'{due_content} | evidence=["request-1","update-1"]'
+    ) in prompt
+    assert (
+        "- EXECUTION | Prior execution: request-1 | "
+        f'{execution_content} | evidence=["request-1","checkpoint-1"]'
+    ) in prompt
+    assert (
+        "A prior EXECUTION suppresses only a DUE_CANDIDATE with the same occurrence_id."
+    ) in prompt
+    assert (
+        "followed by Current decision event if it is not already present; "
+        "include no other IDs."
+    ) in prompt
+
+
+def test_local_decision_d1_version_and_hash_drift_preserve_schema() -> None:
+    prompt_sha256 = hashlib.sha256(
+        local_decision_prompt_contract().encode()
+    ).hexdigest()
+    schema_sha256 = hashlib.sha256(
+        local_decision_schema_contract().encode()
+    ).hexdigest()
+    contract_sha256 = hashlib.sha256(local_decision_contract().encode()).hexdigest()
+
+    assert LOCAL_DECISION_VERSION == "ollama.decision.v0.2"
+    assert prompt_sha256 == (
+        "871fe15e3160e66abe7480cbde15dfb943dec2d0ff89bb01a03849ad35defd8d"
+    )
+    assert prompt_sha256 != (
+        "0a258709387f47fdcc80e9ab701983939df3961695ba7396e6b0be38524991ec"
+    )
+    assert schema_sha256 == (
+        "1b7c38d3f4bf150523ecc1e468ad3fb1f94753611f190d70f93abbf5ec582426"
+    )
+    assert contract_sha256 == (
+        "2f2a701b57f9a6002920d58f9073bb96eea128ad9c830759dc11175007c4d29f"
+    )
 
 
 def test_actual_local_compiler_schema_contains_closed_trigger_variants() -> None:

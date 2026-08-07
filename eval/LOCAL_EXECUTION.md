@@ -241,12 +241,12 @@ must keep setup latency separate and state that electricity and hardware cost
 are unmeasured. Do not feed these logs into the hosted strict baseline/final
 reporter by weakening its manifest checks.
 
-## Oracle-compiler ceiling
+## Oracle-compiler ceiling (D0, completed)
 
-The next smoke-only diagnostic uses the frozen, manually annotated
+The completed smoke-only diagnostic uses the frozen, manually annotated
 [`oracle/smoke_memory_deltas.v1.json`](oracle/smoke_memory_deltas.v1.json).
 It is gold-assisted and tests only the deterministic store, trigger engine,
-renderer, and unchanged `ollama.decision.v0.1` decision policy. It is not an
+renderer, and frozen `ollama.decision.v0.1` decision policy. It is not an
 Anamnesis compiler result, is not hypothesis-test eligible, and its zero
 compiler tokens are a decision-only lower bound with unmeasured human
 annotation effort.
@@ -308,3 +308,62 @@ It cannot be merged into the four-system smoke table or used for token-efficienc
 claims. The strict reporter requires exactly one 10-sample log, no scenario
 compiler ModelEvents, exact frozen deltas, complete zero-cost accounting, and
 one raw decision call per authored checkpoint.
+
+## D1 shared decision-prompt ablation
+
+The oracle result motivated one post-hoc, smoke-only prompt ablation. D1 changes
+only the shared local decision instructions and version to
+`ollama.decision.v0.2`; it does not change the decision schema, compiler prompt
+or schema, memory reducer, trigger engine, renderer, scorer, dataset, RAG, model,
+seed, or execution policy. All four regular systems must be rerun from the same
+new frozen manifest. Oracle inputs are forbidden from this matrix.
+
+The D1 structured-memory rules are frozen before any D1 model call:
+
+1. A structured memory view, when a system provides one, is authoritative.
+2. A provided view with no `DUE_CANDIDATE` requires `no_action`, regardless of
+   wording in the current raw event.
+3. Each `DUE_CANDIDATE` produces exactly one action whose kind, root
+   `action_key`, payload, and summary are copied value-for-value.
+4. Evidence is the candidate evidence in displayed order followed by the
+   current decision event when absent, with no additional IDs.
+5. A prior execution suppresses only the same `occurrence_id`; a different
+   occurrence or date remains actionable even when the root `action_key` is the
+   same.
+6. Systems for which the structured memory view is explicitly not provided
+   continue to reason from their visible context under the general rules.
+
+The frozen D1 prompt SHA-256 is
+`871fe15e3160e66abe7480cbde15dfb943dec2d0ff89bb01a03849ad35defd8d`.
+The combined prompt/schema contract SHA-256 is
+`2f2a701b57f9a6002920d58f9073bb96eea128ad9c830759dc11175007c4d29f`.
+The response schema remains exactly the D0 schema, SHA-256
+`1b7c38d3f4bf150523ecc1e468ad3fb1f94753611f190d70f93abbf5ec582426`.
+The unchanged compiler prompt and schema SHA-256 values are, respectively,
+`b5d910ee7a96e358ef6b1cb45f99627610aeddf9f4a212161bb8fc1f2b452821`
+and `8871ff344eb3a2e88a53b964ef2f24f089a72507c69073ec323cf26a428c3030`.
+
+Commit this source version first, rerun the two-call preflight from that clean
+commit, and freeze a new manifest under `results/runs/local/d1/`. Store all D1
+logs there and write reports to unique `results/local_smoke_d1.*` paths; never
+overwrite or mix the D0 logs and results. Run exactly one complete seed-101
+matrix, in the fixed order `no_memory`, `full_context`, `vector_rag`, then
+`anamnesis`, with the same flags and local artifacts documented above.
+
+The D1 run is invalid if the preflight or strict reporter fails, if any frozen
+hash differs, or if the four logs do not form the exact 4-system × 10-scenario
+matrix. If valid, D1 is promoted only as a local smoke candidate when all of the
+following hold:
+
+- Anamnesis recall is greater than zero;
+- Anamnesis has zero invalid compiler outputs;
+- none of the three simple baselines increases its false-alarm checkpoint count
+  above its D0 value of one; and
+- Anamnesis exact provenance is greater than zero on matched actions.
+
+Report every result even if this gate fails. Token comparisons are permitted
+only within the D1 matrix because the longer shared prompt changes every input
+total. D1 was designed after inspecting the D0 smoke and oracle failures, so it
+cannot support a hypothesis, generalization, or sealed-set claim. It does not
+authorize opening the 35 development scenarios by itself. If the gate fails,
+reject D1 and do not tune a D2 on these same 10 smoke cases.

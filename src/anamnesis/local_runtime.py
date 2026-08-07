@@ -92,7 +92,7 @@ from anamnesis.schema import (
 )
 
 LOCAL_RUNTIME_VERSION = "ollama.local.v0.1"
-LOCAL_DECISION_VERSION = "ollama.decision.v0.1"
+LOCAL_DECISION_VERSION = "ollama.decision.v0.2"
 LOCAL_OLLAMA_MODEL = LOCAL_MODEL_ID
 LOCAL_OLLAMA_SERVICE_MODEL = "qwen3:4b-instruct"
 LOCAL_OLLAMA_BASE_URL = LOCAL_BASE_URL
@@ -160,6 +160,23 @@ LOCAL_ACTION_OUTPUT_GUIDE = (
     "For emit, payload.subject is required. Optional payload slots are address, "
     "build, date, flight, greenhouse, item, project, quantity, recipient, room, "
     "shipment, tank, and trip; omit unused slots.\n"
+)
+LOCAL_STRUCTURED_MEMORY_PRECEDENCE = (
+    "Structured-memory precedence (D1):\n"
+    "- When Structured memory view is provided by this system, it is "
+    "authoritative.\n"
+    "- If it contains zero DUE_CANDIDATE blocks, set mode=no_action with an "
+    "empty actions array regardless of wording in Available context.\n"
+    "- For each DUE_CANDIDATE block, emit exactly one action and copy kind, "
+    "action_key, payload, and summary value-for-value from that block's JSON.\n"
+    "- Set evidence_event_ids to exactly the block's evidence IDs in displayed "
+    "order, followed by Current decision event if it is not already present; "
+    "include no other IDs.\n"
+    "- A prior EXECUTION suppresses only a DUE_CANDIDATE with the same "
+    "occurrence_id. A different occurrence_id or date is a distinct recurring "
+    "occurrence even when action_key is the same.\n"
+    "- When Structured memory view is not provided by this system, use the "
+    "general Rules above.\n"
 )
 
 
@@ -282,7 +299,7 @@ def build_local_decision_prompt(
     return (
         hosted.replace(
             _HOSTED_NO_ACTION_SENTENCE,
-            _LOCAL_NO_ACTION_SENTENCE,
+            f"{_LOCAL_NO_ACTION_SENTENCE}\n{LOCAL_STRUCTURED_MEMORY_PRECEDENCE}",
         )
         .replace(
             _HOSTED_UNUSED_PAYLOAD_SENTENCE,
@@ -1109,6 +1126,7 @@ def verify_zero_local_pricing(path: str | Path) -> str:
 __all__ = [
     "LOCAL_CONTEXT_ENV",
     "LOCAL_DECISION_VERSION",
+    "LOCAL_STRUCTURED_MEMORY_PRECEDENCE",
     "LOCAL_MODEL_PREFLIGHT_PURPOSE",
     "LOCAL_MODEL_PREFLIGHT_TASK_VERSION",
     "LOCAL_NO_CLOUD_ENV",
