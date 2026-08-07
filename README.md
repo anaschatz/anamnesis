@@ -45,6 +45,17 @@ hypothesis testing. A fresh, externally held and independently reviewed
 replacement is required after the system freeze. See
 [`eval/SCENARIO_PLAN.md`](eval/SCENARIO_PLAN.md).
 
+A separate, zero-provider-cost local diagnostic track is also available. It
+uses the already installed `ollama/qwen3:4b-instruct` model through the pinned
+`127.0.0.1` Ollama endpoint and never qualifies as the preregistered final
+hypothesis test. Its real two-call compatibility probe has passed on the local
+Apple M3 machine: it compiled the synthetic 17:00 intention correctly, emitted
+no premature reminder at 09:00, reported complete token usage, and recorded
+`$0.00` provider API cost. The probe must be repeated from a clean commit before
+the 10 smoke scenarios are opened. Exact model/blob hashes, server settings,
+commands, and claim limits are documented in
+[`eval/LOCAL_EXECUTION.md`](eval/LOCAL_EXECUTION.md).
+
 ## Architecture
 
 ```text

@@ -26,6 +26,7 @@ dev = [
 [project.scripts]
 anamnesis-validate = "anamnesis.cli:validate_main"
 anamnesis-report = "anamnesis.cli:report_main"
+anamnesis-local-report = "anamnesis.local_report:local_report_main"
 anamnesis-manifest = "anamnesis.manifest_cli:manifest_main"
 
 [tool.hatch.build.targets.wheel]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Protocol
@@ -63,6 +64,9 @@ async def run_scenario(
     pricing_config_sha256: str | None = None,
     setup_latency_ms: float = 0.0,
     hosted_warmup: HostedWarmupAttestation | None = None,
+    decision_prompt_builder: Callable[..., str] = build_decision_prompt,
+    decision_prompt_contract: str | None = None,
+    decision_prompt_version: str = PROMPT_VERSION,
 ) -> ScenarioRun:
     """Advance the logical clock and record every emitted action."""
 
@@ -93,7 +97,7 @@ async def run_scenario(
         selection = strategy.select(event)
         request = DecisionRequest(
             event=event,
-            prompt=build_decision_prompt(
+            prompt=decision_prompt_builder(
                 now=event.at.isoformat(),
                 current_event_id=event.id,
                 context_events=selection.events,
@@ -166,11 +170,14 @@ async def run_scenario(
     )
     if not cost_complete:
         total_usage = total_usage.model_copy(update={"cost_usd": None})
+    active_prompt_contract = decision_prompt_contract or prompt_contract()
     if system_config_sha256 is None:
         fallback_config: dict[str, object] = {
             "model": model.name,
             "pricing_config_sha256": pricing_config_sha256,
-            "prompt_sha256": hashlib.sha256(prompt_contract().encode()).hexdigest(),
+            "prompt_sha256": hashlib.sha256(
+                active_prompt_contract.encode()
+            ).hexdigest(),
             "system": strategy.name,
         }
         if strategy.name == "anamnesis":
@@ -186,9 +193,9 @@ async def run_scenario(
         system=strategy.name,
         repetition=repetition,
         model=model.name,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=decision_prompt_version,
         scenario_sha256=scenario_sha256_override or canonical_sha256(scenario),
-        prompt_sha256=hashlib.sha256(prompt_contract().encode()).hexdigest(),
+        prompt_sha256=hashlib.sha256(active_prompt_contract.encode()).hexdigest(),
         system_config_sha256=system_config_sha256,
         manifest_sha256=manifest_sha256,
         pricing_config_sha256=pricing_config_sha256,
