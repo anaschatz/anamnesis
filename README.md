@@ -89,6 +89,16 @@ rejected, and no D2 will be tuned on these same smoke cases. See the
 [analysis](results/local_smoke_d1_analysis.md), and
 [provenance sidecar](results/local_smoke_d1.provenance.json).
 
+A fresh 10-case writer diagnostic and gold-assisted reference were then frozen
+before authoring the W1 compiler prompt. The new Qwen 4B attempt stopped at its
+mandatory synthetic preflight: the compiler filled unused optional payload
+slots with empty values, including an invalid `date: ""`, so domain validation
+rejected the delta. The decision preflight passed, but the combined semantic
+gate did not. In accordance with the frozen stopping rule, no writer scenario
+was run and no output repair or retry was attempted. See the
+[W1 preflight failure record](results/local_writer_w1_preflight_failure.md) and
+[SHA-256 provenance sidecar](results/local_writer_w1_preflight_failure.provenance.json).
+
 Both local latency sets are diagnostic only. In D0, the Ollama server was
 restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap
 pressure. In D1, all four tasks stayed in one process, whose prompt cache grew

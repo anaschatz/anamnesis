@@ -25,6 +25,16 @@ false reminders and 2 invalid compiler outputs and failed the frozen promotion
 gate. D1 is rejected; it is not a hypothesis test and does not authorize a
 35-scenario run.
 
+The subsequent [W1 writer preflight record](local_writer_w1_preflight_failure.md)
+documents a stricter compiler prompt tested against the same pinned local model
+only on a synthetic compatibility request. Its compiler output failed domain
+validation because unused optional payload fields were emitted as empty values,
+including `date: ""`. The frozen stopping rule therefore prevented all 10 fresh
+writer scenarios from running. The accompanying
+[provenance sidecar](local_writer_w1_preflight_failure.provenance.json) binds the
+source commit and exact ignored `.eval` bytes. This is a preflight rejection,
+not a scenario result or a hypothesis test.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
