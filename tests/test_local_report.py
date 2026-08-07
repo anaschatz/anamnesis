@@ -686,6 +686,7 @@ def test_local_outputs_have_exact_diagnostic_title_and_no_success_gate(
 
     with csv_path.open(encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
+    assert b"\r\n" not in csv_path.read_bytes()
     assert len(rows) == 4
     assert {row["system"] for row in rows} == set(LOCAL_SYSTEM_TASKS)
     assert all(row["cost_usd"] == "0.0" for row in rows)

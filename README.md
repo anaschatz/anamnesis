@@ -24,7 +24,7 @@ contains:
   artifact guards; and
 - a synthetic hosted-model compatibility preflight.
 
-No empirical result is claimed yet. The first hosted candidate,
+No preregistered hosted benchmark result is claimed yet. The first hosted candidate,
 [`openai/gpt-5.4-mini-2026-03-17`](https://developers.openai.com/api/docs/models/gpt-5.4-mini),
 was rejected before any API or scenario call because the installed Inspect
 Responses path could not preserve both seed and temperature-zero semantics. The
@@ -48,13 +48,24 @@ replacement is required after the system freeze. See
 A separate, zero-provider-cost local diagnostic track is also available. It
 uses the already installed `ollama/qwen3:4b-instruct` model through the pinned
 `127.0.0.1` Ollama endpoint and never qualifies as the preregistered final
-hypothesis test. Its real two-call compatibility probe has passed on the local
-Apple M3 machine: it compiled the synthetic 17:00 intention correctly, emitted
-no premature reminder at 09:00, reported complete token usage, and recorded
-`$0.00` provider API cost. The probe must be repeated from a clean commit before
-the 10 smoke scenarios are opened. Exact model/blob hashes, server settings,
-commands, and claim limits are documented in
+hypothesis test. Its clean two-call compatibility probe and strict four-system
+matrix have now run on the 10 smoke scenarios. The result is deliberately
+negative: all four systems scored F1 0; Anamnesis produced 7 false reminders,
+used 81,617 input tokens versus 66,078 for full-context (23.5% more), and had
+two invalid compiler outputs. Provider API cost was exactly `$0.00` throughout.
+This rejects the current Qwen 4B compiler/prompt configuration as a candidate
+for expansion to the 35 development scenarios; it does not accept or reject the
+research hypothesis. See the strict [result table](results/local_smoke.md),
+[CSV](results/local_smoke.csv), [failure analysis](results/local_smoke_analysis.md),
+and [SHA-256 provenance sidecar](results/local_smoke.provenance.json). Exact
+model/blob hashes, server settings, commands, and claim limits are documented in
 [`eval/LOCAL_EXECUTION.md`](eval/LOCAL_EXECUTION.md).
+
+Local latency is diagnostic only: the Ollama server was restarted before the
+Anamnesis task to clear an 8+ GiB warm prompt cache after macOS swap pressure.
+Accuracy, token, cost, prompt, schema, and raw-call accounting still pass the
+strict reporter, but cross-system latency should not be interpreted as a fair
+benchmark from this run.
 
 ## Architecture
 
