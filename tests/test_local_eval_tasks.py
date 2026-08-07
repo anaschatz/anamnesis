@@ -9,6 +9,7 @@ from inspect_ai.model import get_model_info
 
 from anamnesis.local_experiment import LOCAL_PRICING_SHA256, LocalExperimentManifest
 from anamnesis.local_runtime import LOCAL_OLLAMA_MODEL, LOCAL_ZERO_MODEL_COST
+from anamnesis.oracle import ORACLE_COMPILER_VERSION, ORACLE_SYSTEM_NAME
 
 
 def test_local_task_registry_names_are_isolated_and_frozen() -> None:
@@ -19,6 +20,7 @@ def test_local_task_registry_names_are_isolated_and_frozen() -> None:
         "local_full_context",
         "local_vector_rag",
         "local_anamnesis",
+        "local_anamnesis_oracle_compiler",
     }
 
     assert {
@@ -48,6 +50,7 @@ def test_local_scenario_tasks_fail_closed_without_frozen_manifest() -> None:
         "local_full_context",
         "local_vector_rag",
         "local_anamnesis",
+        "local_anamnesis_oracle_compiler",
     ):
         with pytest.raises(ValueError, match="frozen local manifest"):
             module[name]()
@@ -95,3 +98,67 @@ def test_local_scenario_task_metadata_binds_ordered_smoke_ids(
     assert task.metadata["hypothesis_test_eligible"] is False
     assert task.metadata["provider_api_cost_usd"] == 0.0
     assert task.metadata["live_semantic_preflight_required"] is True
+
+
+def test_local_oracle_task_binds_annotations_and_diagnostic_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = runpy.run_path("eval/anamnesis_local_eval.py")
+    raw = json.loads(
+        Path("eval/local_experiment_manifest.template.json").read_text(encoding="utf-8")
+    )
+    raw["phase"] = "oracle_smoke"
+    raw["compiler_mode"] = "oracle"
+    raw["systems"] = [ORACLE_SYSTEM_NAME]
+    raw["oracle_annotations"] = {
+        "path": "eval/oracle/smoke_memory_deltas.v1.json",
+        "sha256": "a" * 64,
+    }
+    raw["system_config_sha256"] = {ORACLE_SYSTEM_NAME: "b" * 64}
+    model = raw["model"]
+    assert isinstance(model, dict)
+    model["same_model_for_compiler_and_decision"] = False
+    manifest = LocalExperimentManifest.model_validate(raw)
+    dataset_path = Path("eval/scenarios/smoke.jsonl").resolve()
+    system_task = module["_system_task"]
+    monkeypatch.setitem(
+        system_task.__globals__,  # type: ignore[attr-defined]
+        "_validated_local_manifest",
+        lambda *args, **kwargs: (manifest, "c" * 64, dataset_path),
+    )
+    monkeypatch.setitem(
+        system_task.__globals__,  # type: ignore[attr-defined]
+        "_require_oracle_annotations_path",
+        lambda *args, **kwargs: dataset_path,
+    )
+    monkeypatch.setitem(
+        system_task.__globals__,  # type: ignore[attr-defined]
+        "load_oracle_artifact",
+        lambda *args, **kwargs: object(),
+    )
+
+    task = system_task(
+        ORACLE_SYSTEM_NAME,
+        seed=101,
+        repetition=1,
+        manifest="ignored-by-test.json",
+        ollama_models_dir="/ignored/by/test",
+        oracle_annotations_path="eval/oracle/smoke_memory_deltas.v1.json",
+    )
+
+    assert task.metadata["system"] == ORACLE_SYSTEM_NAME
+    assert task.metadata["dataset_split"] == "oracle_smoke"
+    assert task.metadata["compiler_mode"] == "oracle"
+    assert task.metadata["gold_assisted"] is True
+    assert task.metadata["human_annotation_measured"] is False
+    assert task.metadata["setup_preflight_compiler_used_in_scenarios"] is False
+    assert task.metadata["oracle_compiler_version"] == ORACLE_COMPILER_VERSION
+    assert task.metadata["oracle_annotations_path"] == (
+        "eval/oracle/smoke_memory_deltas.v1.json"
+    )
+    assert task.metadata["oracle_annotations_sha256"] == "a" * 64
+    assert task.metadata["oracle_token_scope"] == "decision_only_lower_bound"
+    assert task.metadata["same_model_for_compiler_and_decision"] is False
+    assert task.metadata["scenario_compiler_model_calls"] == 0
+    assert task.metadata["setup_preflight_includes_llm_compiler_call"] is True
+    assert task.metadata["hypothesis_test_eligible"] is False

@@ -16,6 +16,7 @@ from anamnesis.experiment import (
     ArtifactPin,
     EmbeddingPin,
 )
+from anamnesis.oracle import ORACLE_SYSTEM_NAME
 from anamnesis.schema import StrictModel
 
 LOCAL_MODEL_ID = "ollama/qwen3:4b-instruct"
@@ -29,6 +30,7 @@ LOCAL_OLLAMA_VERSION = "0.31.1"
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 LOCAL_SMOKE_SYSTEMS = FINAL_SYSTEMS
+LOCAL_ORACLE_SMOKE_SYSTEMS = {ORACLE_SYSTEM_NAME}
 LOCAL_SMOKE_SEEDS = [101]
 
 
@@ -83,7 +85,7 @@ class LocalModelPin(StrictModel):
     artifact: ArtifactPin
     schema_constrained_output: Literal[True] = True
     live_preflight_required: Literal[True] = True
-    same_model_for_compiler_and_decision: Literal[True] = True
+    same_model_for_compiler_and_decision: bool = True
     provider: LocalProviderRoute = Field(default_factory=LocalProviderRoute)
     pricing: ArtifactPin
     preflight: ArtifactPin
@@ -161,7 +163,8 @@ class LocalExperimentManifest(StrictModel):
     claim_scope: Literal["diagnostic_development_only"] = "diagnostic_development_only"
     hypothesis_test_eligible: Literal[False] = False
     status: Literal["draft", "frozen"] = "draft"
-    phase: Literal["smoke", "baseline"]
+    phase: Literal["smoke", "baseline", "oracle_smoke"]
+    compiler_mode: Literal["llm", "oracle"] = "llm"
     dataset: ArtifactPin
     scenario_count: int = Field(ge=1)
     sealed_opened: bool
@@ -176,6 +179,7 @@ class LocalExperimentManifest(StrictModel):
     dependency_lock: ArtifactPin
     research_contract: ArtifactPin
     architecture_contract: ArtifactPin
+    oracle_annotations: ArtifactPin | None = None
     decision_prompt_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     decision_schema_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     memory_compiler_prompt_sha256: str | None = Field(
@@ -202,6 +206,13 @@ class LocalExperimentManifest(StrictModel):
                 "sealed": False,
                 "seeds": [101],
                 "dataset": "eval/scenarios/dev.jsonl",
+            },
+            "oracle_smoke": {
+                "systems": LOCAL_ORACLE_SMOKE_SYSTEMS,
+                "count": 10,
+                "sealed": False,
+                "seeds": LOCAL_SMOKE_SEEDS,
+                "dataset": "eval/scenarios/smoke.jsonl",
             },
         }[self.phase]
 
@@ -241,6 +252,25 @@ class LocalExperimentManifest(StrictModel):
         if self.model.pricing.path != LOCAL_PRICING_PATH:
             raise ValueError(f"local pricing path must be {LOCAL_PRICING_PATH}")
 
+        if self.phase == "oracle_smoke":
+            if self.oracle_annotations is None:
+                raise ValueError("local oracle_smoke phase requires oracle_annotations")
+            if self.compiler_mode != "oracle":
+                raise ValueError("local oracle_smoke requires compiler_mode=oracle")
+            if self.model.same_model_for_compiler_and_decision:
+                raise ValueError(
+                    "local oracle_smoke requires "
+                    "same_model_for_compiler_and_decision=false"
+                )
+        elif self.oracle_annotations is not None:
+            raise ValueError("oracle_annotations are only valid for local oracle_smoke")
+        elif self.compiler_mode != "llm":
+            raise ValueError(f"local {self.phase} requires compiler_mode=llm")
+        elif not self.model.same_model_for_compiler_and_decision:
+            raise ValueError(
+                f"local {self.phase} requires same_model_for_compiler_and_decision=true"
+            )
+
         invalid_hashes = {
             name: digest
             for name, digest in self.system_config_sha256.items()
@@ -271,6 +301,11 @@ class LocalExperimentManifest(StrictModel):
         ):
             if artifact.sha256 is None:
                 missing.append(f"{name}.sha256")
+        if self.phase == "oracle_smoke":
+            if self.oracle_annotations is None:
+                missing.append("oracle_annotations")
+            elif self.oracle_annotations.sha256 is None:
+                missing.append("oracle_annotations.sha256")
         for name in ("git_commit", "decision_prompt_sha256", "decision_schema_sha256"):
             if getattr(self, name) is None:
                 missing.append(name)
@@ -375,6 +410,8 @@ def verify_static_local_inputs(
         manifest.architecture_contract,
         manifest.dataset,
     )
+    if manifest.oracle_annotations is not None:
+        artifacts = (*artifacts, manifest.oracle_annotations)
     for artifact in artifacts:
         if artifact.sha256 is None:
             if manifest.status == "frozen":

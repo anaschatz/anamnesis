@@ -4,8 +4,8 @@
   "claim_scope": "diagnostic_development_only",
   "hypothesis_test_eligible": false,
   "status": "draft",
-  "phase": "smoke",
-  "compiler_mode": "llm",
+  "phase": "oracle_smoke",
+  "compiler_mode": "oracle",
   "dataset": {
     "path": "eval/scenarios/smoke.jsonl",
     "sha256": "e8f64c0f47896137932e748dc9934a9c4639afc84f6674a553e423b4a9f17c47"
@@ -13,10 +13,7 @@
   "scenario_count": 10,
   "sealed_opened": false,
   "systems": [
-    "no_memory",
-    "full_context",
-    "vector_rag",
-    "anamnesis"
+    "anamnesis_oracle_compiler"
   ],
   "model": {
     "snapshot": "ollama/qwen3:4b-instruct",
@@ -26,7 +23,7 @@
     },
     "schema_constrained_output": true,
     "live_preflight_required": true,
-    "same_model_for_compiler_and_decision": true,
+    "same_model_for_compiler_and_decision": false,
     "provider": {
       "provider": "ollama",
       "base_url": "http://127.0.0.1:11434/v1",
@@ -39,7 +36,7 @@
       "sha256": "c185e2fad06d6bd2abaaf0be81a1720fc245555fa2a477c1b1bea558b28c2f74"
     },
     "preflight": {
-      "path": "results/runs/local/model_preflight.eval",
+      "path": "results/runs/local/oracle/model_preflight.eval",
       "sha256": null
     }
   },
@@ -98,6 +95,10 @@
   "architecture_contract": {
     "path": "ARCHITECTURE.md",
     "sha256": "85b3b9704556a7f0459c19e8b70f50302d60c43b11b0980687d471447b4d4797"
+  },
+  "oracle_annotations": {
+    "path": "eval/oracle/smoke_memory_deltas.v1.json",
+    "sha256": "25e4a601e7a36212854647a8e3d3cdd6ee07eb8de239b489396832397ccae537"
   },
   "decision_prompt_sha256": null,
   "decision_schema_sha256": null,

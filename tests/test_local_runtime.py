@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,7 @@ from inspect_ai.model import ModelInfo, ModelOutput, ModelUsage
 from pydantic import ValidationError
 
 from anamnesis.baselines import NoPersistentMemory
+from anamnesis.io import load_scenarios
 from anamnesis.local_runtime import (
     LOCAL_DECISION_VERSION,
     LOCAL_OLLAMA_BASE_URL,
@@ -27,11 +29,22 @@ from anamnesis.local_runtime import (
     _loaded_model_from_ps,
     _local_memory_delta_schema,
     _local_usage_from_output,
+    _validate_oracle_scenario_run,
     _verify_effective_zero_model_cost,
     _verify_local_ollama_runtime,
     build_local_decision_prompt,
     local_decision_contract,
+    local_scenario_solver,
+    local_system_config_sha256,
     run_local_model_preflight,
+)
+from anamnesis.memory import CancelIntent, MemoryDelta
+from anamnesis.oracle import (
+    ORACLE_COMPILER_VERSION,
+    ORACLE_SYSTEM_NAME,
+    OracleAnamnesisMemoryStrategy,
+    OracleCompiler,
+    load_oracle_artifact,
 )
 from anamnesis.runner import DecisionCall, DecisionRequest, run_scenario
 from anamnesis.schema import (
@@ -208,6 +221,202 @@ def test_effective_local_pricing_must_equal_the_tracked_zero_cost(
     )
     with pytest.raises(ValueError, match="all-zero local pricing"):
         _verify_effective_zero_model_cost(object())
+
+
+def test_oracle_runtime_hash_binds_annotations_and_shared_decision_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(ValueError, match="oracle_annotations_sha256"):
+        local_system_config_sha256(
+            system=ORACLE_SYSTEM_NAME,
+            pricing_config_sha256="1" * 64,
+        )
+
+    first = local_system_config_sha256(
+        system=ORACLE_SYSTEM_NAME,
+        pricing_config_sha256="1" * 64,
+        oracle_annotations_sha256="2" * 64,
+    )
+    second = local_system_config_sha256(
+        system=ORACLE_SYSTEM_NAME,
+        pricing_config_sha256="1" * 64,
+        oracle_annotations_sha256="3" * 64,
+    )
+    monkeypatch.setattr(
+        "anamnesis.local_runtime.local_decision_contract",
+        lambda: "different shared decision contract",
+    )
+    changed_decision = local_system_config_sha256(
+        system=ORACLE_SYSTEM_NAME,
+        pricing_config_sha256="1" * 64,
+        oracle_annotations_sha256="2" * 64,
+    )
+
+    assert first != second
+    assert first != changed_decision
+    assert ORACLE_COMPILER_VERSION == "oracle.v1"
+
+
+def test_oracle_solver_fails_closed_without_pinned_annotations() -> None:
+    with pytest.raises(ValueError, match="pinned oracle artifact"):
+        local_scenario_solver(ORACLE_SYSTEM_NAME)
+
+
+def test_oracle_solver_plan_binds_path_and_hash_not_full_annotations() -> None:
+    path = Path("eval/oracle/smoke_memory_deltas.v1.json").resolve()
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    solver = local_scenario_solver(
+        ORACLE_SYSTEM_NAME,
+        oracle_annotations_path=str(path),
+        oracle_annotations_sha256=digest,
+    )
+
+    params = solver.__registry_params__  # type: ignore[attr-defined]
+    assert params["oracle_annotations_path"] == str(path)
+    assert params["oracle_annotations_sha256"] == digest
+    assert "oracle_artifact" not in params
+    assert "fact_assertions" not in json.dumps(params)
+
+
+def test_oracle_strategy_runner_records_zero_complete_compiler_work() -> None:
+    scenarios = load_scenarios(Path("eval/scenarios/smoke.jsonl"))
+    artifact = load_oracle_artifact(
+        Path("eval/oracle/smoke_memory_deltas.v1.json"), scenarios
+    )
+    scenario = scenarios[0].to_runtime()
+    compiler = OracleCompiler(artifact, scenario)
+
+    class CountingDecisionModel:
+        name = LOCAL_OLLAMA_MODEL
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def decide(self, request: DecisionRequest) -> DecisionCall:
+            self.calls += 1
+            return DecisionCall(
+                decision=Decision(),
+                usage=Usage(cost_usd=0.0),
+                raw_completion='{"mode":"no_action","actions":[]}',
+                usage_complete=True,
+                cost_complete=True,
+            )
+
+    model = CountingDecisionModel()
+    run = asyncio.run(
+        run_scenario(
+            scenario=scenario,
+            strategy=OracleAnamnesisMemoryStrategy(compiler),
+            model=model,
+            decision_prompt_builder=build_local_decision_prompt,
+            decision_prompt_contract=local_decision_contract(),
+            decision_prompt_version=LOCAL_DECISION_VERSION,
+        )
+    )
+    compiler.assert_complete()
+
+    assert run.system == ORACLE_SYSTEM_NAME
+    assert model.calls == len(scenario.events)
+    assert len(compiler.requests) == sum(
+        event.kind != "clock_tick" for event in scenario.events
+    )
+    assert run.compiler_usage == Usage(cost_usd=0.0)
+    assert run.usage.cost_usd == 0.0
+    assert run.usage_complete and run.cost_complete
+    for event, checkpoint in zip(scenario.events, run.checkpoints, strict=True):
+        assert checkpoint.compiler_called is (event.kind != "clock_tick")
+        if checkpoint.compiler_called:
+            assert checkpoint.compiler_usage == Usage(cost_usd=0.0)
+            assert checkpoint.raw_compiler_output is not None
+    _validate_oracle_scenario_run(scenario, run)
+
+    checkpoints = list(run.checkpoints)
+    rejected_index = next(
+        index
+        for index, checkpoint in enumerate(checkpoints)
+        if checkpoint.compiler_called
+    )
+    checkpoints[rejected_index] = checkpoints[rejected_index].model_copy(
+        update={"memory_delta_accepted": False}
+    )
+    rejected = run.model_copy(update={"checkpoints": checkpoints})
+    with pytest.raises(ValueError, match="memory delta was not accepted"):
+        _validate_oracle_scenario_run(scenario, rejected)
+
+
+def test_oracle_run_rejects_a_schema_valid_but_semantically_invalid_delta() -> None:
+    scenarios = load_scenarios(Path("eval/scenarios/smoke.jsonl"))
+    artifact = load_oracle_artifact(
+        Path("eval/oracle/smoke_memory_deltas.v1.json"), scenarios
+    )
+    scenario_records = list(artifact.scenarios)
+    event_records = list(scenario_records[0].events)
+    event_records[0] = event_records[0].model_copy(
+        update={
+            "delta": MemoryDelta(mutations=(CancelIntent(intent_id="never-created"),))
+        }
+    )
+    scenario_records[0] = scenario_records[0].model_copy(
+        update={"events": tuple(event_records)}
+    )
+    invalid_artifact = artifact.model_copy(
+        update={"scenarios": tuple(scenario_records)}
+    )
+    runtime_scenario = scenarios[0].to_runtime()
+    compiler = OracleCompiler(invalid_artifact, runtime_scenario)
+
+    class NoActionDecisionModel:
+        name = LOCAL_OLLAMA_MODEL
+
+        async def decide(self, request: DecisionRequest) -> DecisionCall:
+            return DecisionCall(
+                decision=Decision(),
+                usage=Usage(cost_usd=0.0),
+                cost_complete=True,
+            )
+
+    run = asyncio.run(
+        run_scenario(
+            scenario=runtime_scenario,
+            strategy=OracleAnamnesisMemoryStrategy(compiler),
+            model=NoActionDecisionModel(),
+            decision_prompt_builder=build_local_decision_prompt,
+            decision_prompt_contract=local_decision_contract(),
+            decision_prompt_version=LOCAL_DECISION_VERSION,
+        )
+    )
+
+    assert run.checkpoints[0].memory_delta_accepted is False
+    with pytest.raises(ValueError, match="memory delta was not accepted"):
+        _validate_oracle_scenario_run(runtime_scenario, run)
+
+
+@pytest.mark.parametrize(
+    "compiler_usage",
+    [
+        Usage(input_tokens=1, uncached_input_tokens=1, cost_usd=0.0),
+        Usage(cost_usd=0.01),
+    ],
+)
+def test_oracle_run_rejects_nonzero_compiler_tokens_or_cost(
+    compiler_usage: Usage,
+) -> None:
+    scenarios = load_scenarios(Path("eval/scenarios/smoke.jsonl"))
+    scenario = scenarios[0].to_runtime()
+    checkpoint = SimpleNamespace()
+    run = SimpleNamespace(
+        system=ORACLE_SYSTEM_NAME,
+        checkpoints=[checkpoint] * len(scenario.events),
+        compiler_parse_errors=0,
+        usage_complete=True,
+        cost_complete=True,
+        compiler_usage=compiler_usage,
+        usage=Usage(cost_usd=0.0),
+        decision_usage=Usage(cost_usd=0.0),
+    )
+
+    with pytest.raises(ValueError, match="compiler usage must be exactly zero"):
+        _validate_oracle_scenario_run(scenario, run)  # type: ignore[arg-type]
 
 
 def test_loaded_model_probe_payload_is_bound_to_the_artifact_pin() -> None:

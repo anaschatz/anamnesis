@@ -42,7 +42,6 @@ from anamnesis.baselines import (
 )
 from anamnesis.inspect_adapter import (
     SCENARIO_RUN_STORE_KEY,
-    SystemName,
     _scenario_from_state,
     _scenario_sha256_from_state,
 )
@@ -67,6 +66,13 @@ from anamnesis.memory import (
     CompilerRequest,
     CreateIntent,
 )
+from anamnesis.oracle import (
+    ORACLE_COMPILER_VERSION,
+    ORACLE_SYSTEM_NAME,
+    OracleAnamnesisMemoryStrategy,
+    OracleCompiler,
+    OracleCompilerArtifact,
+)
 from anamnesis.prompts import ACTION_OUTPUT_GUIDE, build_decision_prompt
 from anamnesis.runner import (
     DecisionCall,
@@ -79,6 +85,8 @@ from anamnesis.schema import (
     Decision,
     ObservableEvent,
     ProposedAction,
+    RuntimeScenario,
+    ScenarioRun,
     StrictModel,
     Usage,
 )
@@ -115,6 +123,13 @@ LOCAL_ZERO_MODEL_COST = ModelCost(
     input_cache_write=0.0,
     input_cache_read=0.0,
 )
+LocalSystemName = Literal[
+    "no_memory",
+    "full_context",
+    "vector_rag",
+    "anamnesis",
+    "anamnesis_oracle_compiler",
+]
 
 _HOSTED_NO_ACTION_SENTENCE = (
     '- Return JSON matching the supplied schema. Return {"actions": []} when no '
@@ -825,13 +840,14 @@ def local_model_preflight_scorer() -> Scorer:
 
 def local_system_config_sha256(
     *,
-    system: SystemName,
+    system: LocalSystemName,
     top_k: int = 5,
     embedding_model: str = "BAAI/bge-small-en-v1.5",
     embedding_repository: str = "qdrant/bge-small-en-v1.5-onnx-q",
     embedding_revision: str | None = None,
     embedding_artifact_sha256: str | None = None,
     pricing_config_sha256: str | None = None,
+    oracle_annotations_sha256: str | None = None,
 ) -> str:
     """Fingerprint all local knobs that can change a diagnostic result."""
 
@@ -865,18 +881,70 @@ def local_system_config_sha256(
             embedding_revision=embedding_revision,
             embedding_artifact_sha256=embedding_artifact_sha256,
         )
+    if system in {"anamnesis", ORACLE_SYSTEM_NAME}:
+        payload["deterministic_memory"] = anamnesis_runtime_contract()
     if system == "anamnesis":
         payload["memory_compiler_sha256"] = hashlib.sha256(
             local_memory_compiler_transport_contract().encode()
         ).hexdigest()
-        payload["deterministic_memory"] = anamnesis_runtime_contract()
+    if system == ORACLE_SYSTEM_NAME:
+        if oracle_annotations_sha256 is None or (
+            len(oracle_annotations_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in oracle_annotations_sha256
+            )
+        ):
+            raise ValueError(
+                "oracle system hash requires a valid oracle_annotations_sha256"
+            )
+        payload.update(
+            compiler_mode="oracle",
+            oracle_compiler_version=ORACLE_COMPILER_VERSION,
+            oracle_annotations_sha256=oracle_annotations_sha256,
+            same_model_for_compiler_and_decision=False,
+            shared_decision_contract_version=LOCAL_DECISION_VERSION,
+        )
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode()).hexdigest()
 
 
+def _validate_oracle_scenario_run(
+    scenario: RuntimeScenario,
+    run: ScenarioRun,
+) -> None:
+    """Fail closed unless oracle compilation stayed accepted and token-free."""
+
+    if run.system != ORACLE_SYSTEM_NAME:
+        raise ValueError("oracle runtime produced the wrong system identity")
+    if len(run.checkpoints) != len(scenario.events):
+        raise ValueError("oracle runtime checkpoint coverage differs from scenario")
+    if run.compiler_parse_errors:
+        raise ValueError("oracle runtime recorded a compiler parse error")
+    if not run.usage_complete or not run.cost_complete:
+        raise ValueError("oracle runtime usage and cost must be complete")
+    zero_usage = Usage(cost_usd=0.0)
+    if run.compiler_usage != zero_usage:
+        raise ValueError("oracle compiler usage must be exactly zero and complete")
+    if run.usage != run.decision_usage:
+        raise ValueError("oracle total usage must equal decision-only usage")
+    for event, checkpoint in zip(scenario.events, run.checkpoints, strict=True):
+        expected_call = event.kind != "clock_tick"
+        if checkpoint.compiler_called is not expected_call:
+            raise ValueError("oracle compiler call coverage differs from scenario")
+        if not expected_call:
+            continue
+        if checkpoint.compiler_parse_error:
+            raise ValueError("oracle checkpoint recorded a compiler parse error")
+        if checkpoint.memory_delta_accepted is not True:
+            raise ValueError("oracle memory delta was not accepted")
+        if checkpoint.compiler_usage != zero_usage:
+            raise ValueError("oracle checkpoint compiler usage must be exactly zero")
+
+
 @solver
 def local_scenario_solver(
-    system: SystemName,
+    system: LocalSystemName,
     *,
     repetition: int = 1,
     seed: int | None = None,
@@ -890,6 +958,8 @@ def local_scenario_solver(
     expected_embedding_artifact_sha256: str | None = None,
     manifest_sha256: str | None = None,
     pricing_config_sha256: str | None = None,
+    oracle_annotations_path: str | None = None,
+    oracle_annotations_sha256: str | None = None,
 ) -> Solver:
     """Run one local diagnostic system after a live semantic preflight."""
 
@@ -897,6 +967,14 @@ def local_scenario_solver(
         raise ValueError("repetition must be at least 1")
     if expected_model != LOCAL_OLLAMA_MODEL:
         raise ValueError("local solver expected_model must be the pinned Ollama tag")
+    if system == ORACLE_SYSTEM_NAME:
+        if oracle_annotations_path is None or oracle_annotations_sha256 is None:
+            raise ValueError("local oracle solver requires a pinned oracle artifact")
+        oracle_path = Path(oracle_annotations_path)
+        if not oracle_path.is_absolute() or not oracle_path.is_file():
+            raise ValueError("local oracle solver requires an absolute artifact path")
+    elif oracle_annotations_path is not None or oracle_annotations_sha256 is not None:
+        raise ValueError("oracle inputs are only valid for the oracle system")
 
     shared_vectorizer: Vectorizer | None = None
     if system == "vector_rag":
@@ -932,10 +1010,22 @@ def local_scenario_solver(
                 raise ValueError(
                     "local embedding snapshot differs from the frozen manifest"
                 )
+        oracle_compiler: OracleCompiler | None = None
         if system == "anamnesis":
             strategy = AnamnesisMemoryStrategy(
                 compiler=LocalInspectMemoryCompiler(decision_model)
             )
+        elif system == ORACLE_SYSTEM_NAME:
+            if oracle_annotations_path is None or oracle_annotations_sha256 is None:
+                raise ValueError("oracle artifact was not bound at task construction")
+            oracle_bytes = Path(oracle_annotations_path).read_bytes()
+            if hashlib.sha256(oracle_bytes).hexdigest() != oracle_annotations_sha256:
+                raise ValueError(
+                    "oracle artifact bytes changed after task construction"
+                )
+            oracle_artifact = OracleCompilerArtifact.model_validate_json(oracle_bytes)
+            oracle_compiler = OracleCompiler(oracle_artifact, scenario)
+            strategy = OracleAnamnesisMemoryStrategy(compiler=oracle_compiler)
         else:
             strategy = create_strategy(
                 system,
@@ -954,6 +1044,7 @@ def local_scenario_solver(
                 else None
             ),
             pricing_config_sha256=pricing_config_sha256,
+            oracle_annotations_sha256=oracle_annotations_sha256,
         )
         if (
             expected_system_config_sha256 is not None
@@ -977,6 +1068,9 @@ def local_scenario_solver(
             decision_prompt_contract=local_decision_contract(),
             decision_prompt_version=LOCAL_DECISION_VERSION,
         )
+        if oracle_compiler is not None:
+            oracle_compiler.assert_complete()
+            _validate_oracle_scenario_run(scenario, run)
         if run.usage.cost_usd != 0.0 or not run.cost_complete:
             raise ValueError("local run did not preserve complete zero-cost accounting")
         state = decision_model.state
@@ -1028,6 +1122,7 @@ __all__ = [
     "LocalDecisionWire",
     "LocalInspectDecisionModel",
     "LocalInspectMemoryCompiler",
+    "LocalSystemName",
     "LocalLoadedModelAttestation",
     "LocalModelPreflightResult",
     "build_local_decision_prompt",

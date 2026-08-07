@@ -12,7 +12,6 @@ from inspect_ai.model import GenerateConfig, ModelInfo, set_model_info
 
 from anamnesis.cli import _verify_git_state
 from anamnesis.inspect_adapter import (
-    SystemName,
     scenario_record_to_sample,
     scenario_run_scorer,
 )
@@ -37,6 +36,7 @@ from anamnesis.local_runtime import (
     LOCAL_OLLAMA_CONTEXT_LENGTH,
     LOCAL_SCENARIO_TASK_VERSION,
     LOCAL_ZERO_MODEL_COST,
+    LocalSystemName,
     local_decision_prompt_contract,
     local_decision_schema_contract,
     local_memory_compiler_prompt_contract,
@@ -46,6 +46,13 @@ from anamnesis.local_runtime import (
     local_model_preflight_solver,
     local_scenario_solver,
     local_system_config_sha256,
+)
+from anamnesis.oracle import (
+    ORACLE_ANNOTATION_POLICY,
+    ORACLE_ARTIFACT_PURPOSE,
+    ORACLE_COMPILER_VERSION,
+    ORACLE_SYSTEM_NAME,
+    load_oracle_artifact,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -133,10 +140,27 @@ def _repo_artifact_path(relative: str) -> Path:
     return path
 
 
+def _require_oracle_annotations_path(
+    value: str | None,
+    *,
+    manifest_path: str,
+) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("local oracle task requires oracle_annotations_path")
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = REPO_ROOT / candidate
+    provided = candidate.resolve()
+    expected = _repo_artifact_path(manifest_path)
+    if provided != expected:
+        raise ValueError("oracle_annotations_path differs from the frozen manifest pin")
+    return expected
+
+
 def _validated_local_manifest(
     manifest_path: str | None,
     *,
-    system: SystemName,
+    system: LocalSystemName,
     seed: int | None,
     repetition: int,
     ollama_models_dir: str | None,
@@ -201,6 +225,12 @@ def _validated_local_manifest(
                 manifest.embedding.artifact_sha256 if name == "vector_rag" else None
             ),
             pricing_config_sha256=manifest.model.pricing.sha256,
+            oracle_annotations_sha256=(
+                manifest.oracle_annotations.sha256
+                if name == ORACLE_SYSTEM_NAME
+                and manifest.oracle_annotations is not None
+                else None
+            ),
         )
         for name in manifest.systems
     }
@@ -242,13 +272,14 @@ def local_model_preflight(seed: int = 101) -> Task:
 
 
 def _system_task(
-    system: SystemName,
+    system: LocalSystemName,
     *,
     seed: int | None,
     repetition: int,
     manifest: str | None,
     ollama_models_dir: str | None,
     embedding_snapshot_path: str | None = None,
+    oracle_annotations_path: str | None = None,
 ) -> Task:
     frozen, manifest_sha256, dataset_path = _validated_local_manifest(
         manifest,
@@ -262,6 +293,22 @@ def _system_task(
             embedding_snapshot_path
         )
     scenarios = load_scenarios(dataset_path)
+    oracle_runtime_path: str | None = None
+    oracle_annotations_sha256: str | None = None
+    if system == ORACLE_SYSTEM_NAME:
+        if frozen.oracle_annotations is None:
+            raise ValueError("frozen oracle manifest omitted oracle_annotations")
+        annotations_path = _require_oracle_annotations_path(
+            oracle_annotations_path,
+            manifest_path=frozen.oracle_annotations.path,
+        )
+        load_oracle_artifact(annotations_path, scenarios)
+        oracle_runtime_path = str(annotations_path)
+        oracle_annotations_sha256 = frozen.oracle_annotations.sha256
+        if oracle_annotations_sha256 is None:
+            raise ValueError("frozen oracle manifest omitted annotation SHA-256")
+    elif oracle_annotations_path is not None:
+        raise ValueError("oracle_annotations_path is only valid for the oracle task")
     return Task(
         dataset=_scenario_dataset(
             dataset_path,
@@ -283,6 +330,8 @@ def _system_task(
             ),
             manifest_sha256=manifest_sha256,
             pricing_config_sha256=frozen.model.pricing.sha256,
+            oracle_annotations_path=oracle_runtime_path,
+            oracle_annotations_sha256=oracle_annotations_sha256,
         ),
         scorer=scenario_run_scorer(),
         config=GenerateConfig(
@@ -311,6 +360,28 @@ def _system_task(
             "pricing_config_sha256": ACTIVE_LOCAL_PRICING_SHA256,
             "electricity_measured": False,
             "decision_prompt_version": LOCAL_DECISION_VERSION,
+            **(
+                {
+                    "compiler_mode": frozen.compiler_mode,
+                    "gold_assisted": True,
+                    "human_annotation_measured": False,
+                    "oracle_artifact_purpose": ORACLE_ARTIFACT_PURPOSE,
+                    "oracle_annotation_policy": ORACLE_ANNOTATION_POLICY,
+                    "oracle_compiler_version": ORACLE_COMPILER_VERSION,
+                    "oracle_annotations_path": frozen.oracle_annotations.path,
+                    "oracle_annotations_sha256": oracle_annotations_sha256,
+                    "oracle_token_scope": "decision_only_lower_bound",
+                    "same_model_for_compiler_and_decision": (
+                        frozen.model.same_model_for_compiler_and_decision
+                    ),
+                    "scenario_compiler_model_calls": 0,
+                    "setup_preflight_includes_llm_compiler_call": True,
+                    "setup_preflight_compiler_used_in_scenarios": False,
+                }
+                if system == ORACLE_SYSTEM_NAME
+                and frozen.oracle_annotations is not None
+                else {}
+            ),
         },
     )
 
@@ -378,4 +449,22 @@ def local_anamnesis(
         repetition=repetition,
         manifest=manifest,
         ollama_models_dir=ollama_models_dir,
+    )
+
+
+@task
+def local_anamnesis_oracle_compiler(
+    seed: int | None = None,
+    repetition: int = 1,
+    manifest: str | None = None,
+    ollama_models_dir: str | None = None,
+    oracle_annotations_path: str | None = None,
+) -> Task:
+    return _system_task(
+        ORACLE_SYSTEM_NAME,
+        seed=seed,
+        repetition=repetition,
+        manifest=manifest,
+        ollama_models_dir=ollama_models_dir,
+        oracle_annotations_path=oracle_annotations_path,
     )

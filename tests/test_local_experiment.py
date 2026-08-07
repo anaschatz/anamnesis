@@ -16,6 +16,7 @@ from anamnesis.local_experiment import (
     verify_ollama_artifact,
     verify_static_local_inputs,
 )
+from anamnesis.oracle import ORACLE_SYSTEM_NAME
 
 TEMPLATE = Path("eval/local_experiment_manifest.template.json")
 MODEL_PIN = Path("eval/ollama_qwen3_4b_instruct.pin.json")
@@ -25,6 +26,21 @@ COMMIT = "b" * 40
 
 def _template_raw() -> dict[str, object]:
     return json.loads(TEMPLATE.read_text(encoding="utf-8"))
+
+
+def _oracle_raw(*, annotation_sha256: str | None = HASH) -> dict[str, object]:
+    raw = _template_raw()
+    raw["phase"] = "oracle_smoke"
+    raw["compiler_mode"] = "oracle"
+    raw["systems"] = [ORACLE_SYSTEM_NAME]
+    raw["oracle_annotations"] = {
+        "path": "eval/oracle/smoke_memory_deltas.v1.json",
+        "sha256": annotation_sha256,
+    }
+    model = raw["model"]
+    assert isinstance(model, dict)
+    model["same_model_for_compiler_and_decision"] = False
+    return raw
 
 
 def test_local_smoke_template_is_valid_and_static_inputs_match() -> None:
@@ -73,6 +89,123 @@ def test_local_track_cannot_be_used_as_a_final_hypothesis_run() -> None:
 
     with pytest.raises(ValidationError):
         LocalExperimentManifest.model_validate(raw)
+
+
+def test_local_oracle_smoke_is_a_distinct_single_system_phase() -> None:
+    manifest = LocalExperimentManifest.model_validate(_oracle_raw())
+
+    assert manifest.phase == "oracle_smoke"
+    assert manifest.systems == [ORACLE_SYSTEM_NAME]
+    assert manifest.scenario_count == 10
+    assert manifest.dataset.path == "eval/scenarios/smoke.jsonl"
+    assert manifest.execution.seeds == [101]
+    assert manifest.oracle_annotations is not None
+    assert manifest.oracle_annotations.sha256 == HASH
+
+
+def test_local_oracle_annotations_are_required_only_for_oracle_smoke() -> None:
+    missing = _oracle_raw()
+    missing.pop("oracle_annotations")
+    with pytest.raises(ValidationError, match="requires oracle_annotations"):
+        LocalExperimentManifest.model_validate(missing)
+
+    smoke = _template_raw()
+    smoke["oracle_annotations"] = {
+        "path": "eval/oracle/smoke_memory_deltas.v1.json",
+        "sha256": HASH,
+    }
+    with pytest.raises(ValidationError, match="only valid"):
+        LocalExperimentManifest.model_validate(smoke)
+
+
+def test_compiler_mode_and_same_model_claim_are_phase_locked() -> None:
+    oracle = _oracle_raw()
+    oracle["compiler_mode"] = "llm"
+    with pytest.raises(ValidationError, match="compiler_mode=oracle"):
+        LocalExperimentManifest.model_validate(oracle)
+
+    oracle = _oracle_raw()
+    model = oracle["model"]
+    assert isinstance(model, dict)
+    model["same_model_for_compiler_and_decision"] = True
+    with pytest.raises(
+        ValidationError, match="same_model_for_compiler_and_decision=false"
+    ):
+        LocalExperimentManifest.model_validate(oracle)
+
+    smoke = _template_raw()
+    smoke["compiler_mode"] = "oracle"
+    with pytest.raises(ValidationError, match="compiler_mode=llm"):
+        LocalExperimentManifest.model_validate(smoke)
+
+    smoke = _template_raw()
+    smoke_model = smoke["model"]
+    assert isinstance(smoke_model, dict)
+    smoke_model["same_model_for_compiler_and_decision"] = False
+    with pytest.raises(
+        ValidationError, match="same_model_for_compiler_and_decision=true"
+    ):
+        LocalExperimentManifest.model_validate(smoke)
+
+    baseline = _template_raw()
+    baseline["phase"] = "baseline"
+    baseline["scenario_count"] = 35
+    baseline["systems"] = ["no_memory", "full_context", "vector_rag"]
+    baseline["dataset"] = {
+        "path": "eval/scenarios/dev.jsonl",
+        "sha256": HASH,
+    }
+    baseline["compiler_mode"] = "oracle"
+    baseline_model = baseline["model"]
+    assert isinstance(baseline_model, dict)
+    baseline_model["same_model_for_compiler_and_decision"] = False
+    with pytest.raises(ValidationError, match="compiler_mode=llm"):
+        LocalExperimentManifest.model_validate(baseline)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("systems", [ORACLE_SYSTEM_NAME, "anamnesis"]),
+        ("scenario_count", 35),
+        ("sealed_opened", True),
+        ("dataset", {"path": "eval/scenarios/dev.jsonl", "sha256": HASH}),
+    ],
+)
+def test_local_oracle_smoke_matrix_cannot_drift(field: str, value: object) -> None:
+    raw = _oracle_raw()
+    raw[field] = value
+
+    with pytest.raises(ValidationError):
+        LocalExperimentManifest.model_validate(raw)
+
+
+def test_frozen_local_oracle_requires_annotation_hash() -> None:
+    raw = _oracle_raw(annotation_sha256=None)
+    raw["status"] = "frozen"
+
+    with pytest.raises(ValidationError, match="oracle_annotations.sha256"):
+        LocalExperimentManifest.model_validate(raw)
+
+
+def test_complete_frozen_local_oracle_manifest_needs_no_llm_compiler_contract() -> None:
+    raw = _oracle_raw()
+    raw["status"] = "frozen"
+    raw["git_commit"] = COMMIT
+    raw["decision_prompt_sha256"] = HASH
+    raw["decision_schema_sha256"] = HASH
+    raw["system_config_sha256"] = {ORACLE_SYSTEM_NAME: HASH}
+    model = raw["model"]
+    assert isinstance(model, dict)
+    preflight = model["preflight"]
+    assert isinstance(preflight, dict)
+    preflight["sha256"] = HASH
+
+    manifest = LocalExperimentManifest.model_validate(raw)
+
+    assert manifest.status == "frozen"
+    assert manifest.memory_compiler_prompt_sha256 is None
+    assert manifest.memory_compiler_schema_sha256 is None
 
 
 def test_local_route_cannot_be_changed_to_remote_or_cloud_enabled() -> None:

@@ -240,3 +240,71 @@ errors, input/output tokens, zero provider API cost and prewarmed latency. It
 must keep setup latency separate and state that electricity and hardware cost
 are unmeasured. Do not feed these logs into the hosted strict baseline/final
 reporter by weakening its manifest checks.
+
+## Oracle-compiler ceiling
+
+The next smoke-only diagnostic uses the frozen, manually annotated
+[`oracle/smoke_memory_deltas.v1.json`](oracle/smoke_memory_deltas.v1.json).
+It is gold-assisted and tests only the deterministic store, trigger engine,
+renderer, and unchanged `ollama.decision.v0.1` decision policy. It is not an
+Anamnesis compiler result, is not hypothesis-test eligible, and its zero
+compiler tokens are a decision-only lower bound with unmeasured human
+annotation effort.
+
+The offline sanitized replay must first remain exactly TP 8, FP 0, FN 0, with
+provenance 8/8. Then commit the oracle implementation and require a clean
+worktree. Because the preflight is bound to the source commit, rerun
+`local_model_preflight` from that commit and place its exact path and SHA-256,
+the clean Git SHA, current decision prompt/schema hashes, and the singleton
+oracle system hash into a copy of
+[`local_oracle_manifest.template.json`](local_oracle_manifest.template.json).
+Keep the filled manifest under `results/runs/local/oracle/` and change its
+status to `frozen`.
+
+The setup preflight still makes one compiler-schema compatibility call and one
+decision call. The compiler call is setup-only and is never used by the oracle
+scenario execution. Every non-clock scenario checkpoint replays one local
+annotation record with zero model calls, tokens, and provider cost; every
+checkpoint still makes exactly one decision-model call.
+
+With the same five Ollama environment declarations and common Inspect flags
+shown above:
+
+```bash
+ANAMNESIS_ORACLE_MANIFEST="$PWD/results/runs/local/oracle/experiment.oracle.json"
+ANAMNESIS_ORACLE_ANNOTATIONS="$PWD/eval/oracle/smoke_memory_deltas.v1.json"
+ANAMNESIS_OLLAMA_MODELS="$HOME/.ollama/models"
+
+inspect eval eval/anamnesis_local_eval.py@local_anamnesis_oracle_compiler \
+  --model ollama/qwen3:4b-instruct \
+  --model-base-url http://127.0.0.1:11434/v1 \
+  --temperature 0 --seed 101 --cache false --epochs 1 --max-retries 0 \
+  --max-samples 1 --max-tasks 1 --max-connections 1 \
+  --adaptive-connections false --log-model-api \
+  --log-format eval --log-dir results/runs/local/oracle/smoke --json \
+  -T seed=101 -T repetition=1 \
+  -T manifest="$ANAMNESIS_ORACLE_MANIFEST" \
+  -T ollama_models_dir="$ANAMNESIS_OLLAMA_MODELS" \
+  -T oracle_annotations_path="$ANAMNESIS_ORACLE_ANNOTATIONS"
+```
+
+Pass the single successful `.eval` path to the separate fail-closed reporter:
+
+```bash
+ANAMNESIS_ORACLE_LOG="/replace/with/oracle-log.eval"
+
+anamnesis-oracle-report \
+  --manifest "$ANAMNESIS_ORACLE_MANIFEST" \
+  --scenarios eval/scenarios/smoke.jsonl \
+  --oracle-artifact "$ANAMNESIS_ORACLE_ANNOTATIONS" \
+  --run "$ANAMNESIS_ORACLE_LOG" \
+  --csv results/local_oracle_smoke.csv \
+  --markdown results/local_oracle_smoke.md \
+  --provenance results/local_oracle_smoke.provenance.json
+```
+
+The report title must be **Local oracle-compiler ceiling — diagnostic only**.
+It cannot be merged into the four-system smoke table or used for token-efficiency
+claims. The strict reporter requires exactly one 10-sample log, no scenario
+compiler ModelEvents, exact frozen deltas, complete zero-cost accounting, and
+one raw decision call per authored checkpoint.
