@@ -16,9 +16,12 @@
   "model": {
     "snapshot": null,
     "strict_structured_output": true,
+    "provider_args": {
+      "responses_api": false
+    },
     "pricing": {
       "path": "eval/model_costs.json",
-      "sha256": null
+      "sha256": "45558119c159181ff987c37acf6df0225a16a81ef7030bc001ccdc0ad0d87319"
     },
     "preflight": {
       "path": "results/runs/model_preflight.eval",
@@ -28,8 +31,8 @@
   "embedding": {
     "model": "BAAI/bge-small-en-v1.5",
     "repository": "qdrant/bge-small-en-v1.5-onnx-q",
-    "revision": null,
-    "artifact_sha256": null,
+    "revision": "52398278842ec682c6f32300af41344b1c0b0bb2",
+    "artifact_sha256": "d435d05b3411502ad9a280cc9ac0157f7bcd9f176df2fdc8971f788a121a02d7",
     "top_k": 5
   },
   "execution": {
@@ -39,6 +42,8 @@
     "response_cache": false,
     "max_samples": 1,
     "concurrency": 1,
+    "max_retries": 0,
+    "log_model_api": true,
     "warmup": "prewarmed"
   },
   "git_commit": null,

@@ -18,10 +18,12 @@ from inspect_ai.log import (
 from inspect_ai.model import (
     ChatMessageUser,
     GenerateConfig,
+    ModelCall,
     ModelCost,
     ModelOutput,
     ModelUsage,
 )
+from inspect_ai.model._openai import openai_completion_params
 
 from anamnesis.experiment import ArtifactPin
 from anamnesis.inspect_adapter import (
@@ -33,11 +35,13 @@ from anamnesis.preflight import (
     MODEL_PREFLIGHT_PURPOSE,
     MODEL_PREFLIGHT_TASK_VERSION,
     _expected_prompts,
+    _validate_openai_chat_completion_log,
     validate_model_preflight_artifact,
     validate_model_preflight_log,
 )
 
-MODEL = "openai/frozen-snapshot"
+MODEL = "openai/gpt-4.1-mini-2025-04-14"
+SERVICE_MODEL = "gpt-4.1-mini-2025-04-14"
 MODEL_COST = ModelCost(
     input=1.0,
     output=2.0,
@@ -53,12 +57,32 @@ def _model_event(prompt: str, schema, completion: str) -> ModelEvent:
         total_tokens=110,
         total_cost=0.00012,
     )
+    config = GenerateConfig(
+        temperature=0.0,
+        seed=101,
+        cache=False,
+        max_retries=0,
+        max_connections=1,
+        adaptive_connections=False,
+        response_schema=schema,
+    )
+    request = openai_completion_params(SERVICE_MODEL, config, tools=False)
+    request.update(
+        messages=[{"role": "user", "content": prompt}],
+        tools=None,
+        tool_choice=None,
+        extra_headers={"x-irid": "test-request-id"},
+    )
     return ModelEvent.model_construct(
         event="model",
         model=MODEL,
         input=[ChatMessageUser(content=prompt)],
-        config=GenerateConfig(response_schema=schema),
+        config=config,
         output=ModelOutput(model=MODEL, completion=completion, usage=usage),
+        call=ModelCall(
+            request=request,
+            response={"model": SERVICE_MODEL},
+        ),
         cache=None,
         error=None,
         retries=None,
@@ -115,14 +139,22 @@ def _valid_preflight_log() -> EvalLog:
         task_version=MODEL_PREFLIGHT_TASK_VERSION,
         metadata={"purpose": MODEL_PREFLIGHT_PURPOSE},
         model=MODEL,
+        model_base_url=None,
+        model_args={"responses_api": False},
         model_generate_config=GenerateConfig(
             temperature=0.0,
             seed=101,
             cache=False,
+            max_retries=0,
             max_connections=1,
             adaptive_connections=False,
         ),
-        config=EvalConfig(max_samples=1, max_tasks=1, epochs=1),
+        config=EvalConfig(
+            max_samples=1,
+            max_tasks=1,
+            epochs=1,
+            log_model_api=True,
+        ),
         revision=EvalRevision(
             type="git",
             origin="test",
@@ -150,6 +182,82 @@ def test_semantic_preflight_accepts_exact_two_call_attestation() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("tamper", "expected"),
+    [
+        ("messages", "messages differ"),
+        ("route", "unpinned generation or transport"),
+        ("model", "request model"),
+        ("temperature", "unpinned generation or transport"),
+        ("seed", "unpinned generation or transport"),
+        ("top_p", "unpinned generation or transport"),
+        ("tools", "contains tools"),
+        ("header", "unpinned headers"),
+        ("event_config", "unpinned generation configuration"),
+        ("description", "unpinned response-format"),
+        ("strict", "strict response schema"),
+        ("response_model", "response model"),
+        ("missing_call", "raw API call"),
+    ],
+)
+def test_raw_openai_request_attestation_fails_closed(
+    tamper: str,
+    expected: str,
+) -> None:
+    log = _valid_preflight_log()
+    event = log.samples[0].events[0]
+    assert isinstance(event, ModelEvent)
+    assert event.call is not None
+    if tamper == "messages":
+        event.call.request["messages"] = [
+            {"role": "user", "content": "arbitrary different prompt"}
+        ]
+    elif tamper == "route":
+        event.call.request.pop("messages")
+        event.call.request["input"] = []
+    elif tamper == "model":
+        event.call.request["model"] = "gpt-4.1-mini"
+    elif tamper == "temperature":
+        event.call.request.pop("temperature")
+    elif tamper == "seed":
+        event.call.request.pop("seed")
+    elif tamper == "top_p":
+        event.call.request["top_p"] = 0.9
+    elif tamper == "tools":
+        event.call.request["tools"] = []
+    elif tamper == "header":
+        headers = event.call.request["extra_headers"]
+        assert isinstance(headers, dict)
+        headers["x-user-header"] = "unfrozen"
+    elif tamper == "event_config":
+        event.config.top_p = 0.9
+    elif tamper == "description":
+        response_format = event.call.request["response_format"]
+        assert isinstance(response_format, dict)
+        raw_schema = response_format["json_schema"]
+        assert isinstance(raw_schema, dict)
+        raw_schema["description"] = "unfrozen description"
+    elif tamper == "strict":
+        response_format = event.call.request["response_format"]
+        assert isinstance(response_format, dict)
+        raw_schema = response_format["json_schema"]
+        assert isinstance(raw_schema, dict)
+        raw_schema["strict"] = False
+    elif tamper == "response_model":
+        assert event.call.response is not None
+        event.call.response["model"] = "gpt-4.1-mini"
+    else:
+        event.call = None
+
+    with pytest.raises(ValueError, match=expected):
+        _validate_openai_chat_completion_log(
+            log,
+            model_name=MODEL,
+            temperature=0.0,
+            seed=101,
+        )
+
+
 @pytest.mark.parametrize("tamper", ["prompt", "schema", "cost", "cache"])
 def test_semantic_preflight_rejects_tampered_model_events(tamper: str) -> None:
     log = _valid_preflight_log()
@@ -157,10 +265,10 @@ def test_semantic_preflight_rejects_tampered_model_events(tamper: str) -> None:
     assert isinstance(first, ModelEvent)
     if tamper == "prompt":
         first.input = [ChatMessageUser(content="different compiler prompt")]
-        expected = "prompt differs"
+        expected = "messages differ"
     elif tamper == "schema":
         first.config.response_schema = _decision_schema(MODEL)
-        expected = "strict schema"
+        expected = "strict response schema"
     elif tamper == "cost":
         assert first.output.usage is not None
         first.output.usage.total_cost = 1.0

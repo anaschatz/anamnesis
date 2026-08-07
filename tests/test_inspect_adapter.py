@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import runpy
+from types import SimpleNamespace
 
 import pytest
 from inspect_ai.model import ModelOutput, ModelUsage
@@ -16,6 +17,7 @@ from anamnesis.inspect_adapter import (
     _supports_strict_schema,
     _TaskHostedWarmup,
     _usage_from_output,
+    _verify_official_openai_endpoint,
     scenario_record_to_sample,
     scenario_solver,
 )
@@ -129,6 +131,27 @@ def test_strict_schema_is_enabled_only_for_supported_providers() -> None:
     assert not _supports_strict_schema("mockllm/model")
 
 
+def test_official_openai_endpoint_guard_rejects_environment_proxy() -> None:
+    official = SimpleNamespace(
+        api=SimpleNamespace(
+            client=SimpleNamespace(base_url="https://api.openai.com/v1/")
+        )
+    )
+    _verify_official_openai_endpoint(
+        official,
+        "openai/gpt-4.1-mini-2025-04-14",
+    )
+
+    proxy = SimpleNamespace(
+        api=SimpleNamespace(client=SimpleNamespace(base_url="https://proxy.invalid/v1"))
+    )
+    with pytest.raises(ValueError, match="official OpenAI endpoint"):
+        _verify_official_openai_endpoint(
+            proxy,
+            "openai/gpt-4.1-mini-2025-04-14",
+        )
+
+
 def test_sealed_all_dataset_fails_closed_without_frozen_manifest() -> None:
     module = runpy.run_path("eval/anamnesis_eval.py")
     with pytest.raises(ValueError, match="frozen final manifest"):
@@ -146,8 +169,12 @@ def test_measured_task_freezes_generation_cache_and_connection_policy() -> None:
     assert task.config.temperature == 0.0
     assert task.config.seed == 101
     assert task.config.cache is False
+    assert task.config.max_retries == 0
     assert task.config.max_connections == 1
     assert task.config.adaptive_connections is False
+
+    preflight = module["model_preflight"]()
+    assert preflight.config.max_retries == 0
 
 
 @pytest.mark.parametrize("factory", [_decision_schema, _memory_delta_schema])

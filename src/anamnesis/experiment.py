@@ -25,11 +25,18 @@ class ArtifactPin(StrictModel):
     sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
 
 
+class ModelProviderArgs(StrictModel):
+    """Exact provider route required by the v0 hosted-model protocol."""
+
+    responses_api: Literal[False]
+
+
 class ModelPin(StrictModel):
     """The hosted snapshot and pricing inputs used for all compared systems."""
 
     snapshot: str | None = Field(default=None, min_length=1)
     strict_structured_output: bool = True
+    provider_args: ModelProviderArgs
     pricing: ArtifactPin
     preflight: ArtifactPin
 
@@ -53,6 +60,8 @@ class ExecutionPolicy(StrictModel):
     response_cache: bool = False
     max_samples: int = Field(default=1, ge=1, le=1)
     concurrency: int = Field(default=1, ge=1, le=1)
+    max_retries: Literal[0] = 0
+    log_model_api: Literal[True] = True
     warmup: Literal["prewarmed"] = "prewarmed"
 
     @model_validator(mode="after")

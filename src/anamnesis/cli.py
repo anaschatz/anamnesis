@@ -23,7 +23,10 @@ from anamnesis.io import (
     load_scenarios,
     require_preregistered_final_dataset,
 )
-from anamnesis.preflight import validate_model_preflight_artifact
+from anamnesis.preflight import (
+    _validate_openai_chat_completion_log,
+    validate_model_preflight_artifact,
+)
 from anamnesis.prompts import memory_compiler_contract, prompt_contract
 from anamnesis.schema import Scenario, ScenarioRun, Usage
 from anamnesis.scoring import (
@@ -68,6 +71,9 @@ class InspectLogMetadata:
     task_args: dict[str, Any]
     task_metadata: dict[str, Any]
     model: str
+    model_base_url: str | None
+    model_args: dict[str, Any]
+    generation_config: dict[str, Any]
     dataset_name: str | None
     dataset_location: str | None
     dataset_samples: int | None
@@ -76,10 +82,12 @@ class InspectLogMetadata:
     temperature: float | None
     seed: int | None
     response_cache: object
+    max_retries: int | None
     max_connections: int | None
     adaptive_connections: object
     max_samples: int | None
     max_tasks: int | None
+    log_model_api: bool | None
     epochs: int | None
     revision_commit: str | None
     revision_dirty: bool | None
@@ -96,6 +104,10 @@ class InspectLogPolicy:
     max_connections: int
     max_samples: int
     max_tasks: int
+    model_base_url: str | None
+    model_args: dict[str, Any]
+    max_retries: int
+    log_model_api: bool
     git_commit: str | None
 
 
@@ -143,6 +155,9 @@ def _inspect_log_metadata(log: EvalLog) -> InspectLogMetadata:
         task_args=dict(log.eval.task_args),
         task_metadata=dict(log.eval.metadata or {}),
         model=log.eval.model,
+        model_base_url=log.eval.model_base_url,
+        model_args=dict(log.eval.model_args),
+        generation_config=generation.model_dump(mode="json", exclude_none=True),
         dataset_name=log.eval.dataset.name,
         dataset_location=log.eval.dataset.location,
         dataset_samples=log.eval.dataset.samples,
@@ -155,10 +170,12 @@ def _inspect_log_metadata(log: EvalLog) -> InspectLogMetadata:
         temperature=generation.temperature,
         seed=generation.seed,
         response_cache=generation.cache,
+        max_retries=generation.max_retries,
         max_connections=generation.max_connections,
         adaptive_connections=generation.adaptive_connections,
         max_samples=eval_config.max_samples,
         max_tasks=eval_config.max_tasks,
+        log_model_api=eval_config.log_model_api,
         epochs=eval_config.epochs,
         revision_commit=revision.commit if revision is not None else None,
         revision_dirty=revision.dirty if revision is not None else None,
@@ -181,12 +198,28 @@ def _validate_inspect_log_policy(
         raise ValueError("edited Inspect logs cannot be measured")
     if metadata.model != policy.model:
         raise ValueError("Inspect log model differs from the frozen manifest")
+    if metadata.model_base_url != policy.model_base_url:
+        raise ValueError("Inspect log does not prove the official provider base URL")
+    if metadata.model_args != policy.model_args:
+        raise ValueError("Inspect log model arguments differ from execution policy")
+    expected_generation_config = {
+        "max_retries": policy.max_retries,
+        "max_connections": policy.max_connections,
+        "adaptive_connections": False,
+        "temperature": policy.temperature,
+        "seed": policy.seed,
+        "cache": policy.response_cache,
+    }
+    if metadata.generation_config != expected_generation_config:
+        raise ValueError("Inspect log contains unpinned generation configuration")
     if metadata.temperature != policy.temperature:
         raise ValueError("Inspect log temperature differs from execution policy")
     if metadata.seed != policy.seed:
         raise ValueError("Inspect log seed differs from execution policy")
     if metadata.response_cache is not policy.response_cache:
         raise ValueError("Inspect response-generation cache policy is unverifiable")
+    if metadata.max_retries != policy.max_retries:
+        raise ValueError("Inspect max_retries differs from execution policy")
     if metadata.max_connections != policy.max_connections:
         raise ValueError("Inspect max_connections differs from execution policy")
     if metadata.adaptive_connections not in (None, False):
@@ -195,6 +228,8 @@ def _validate_inspect_log_policy(
         raise ValueError("Inspect max_samples differs from execution policy")
     if metadata.max_tasks != policy.max_tasks:
         raise ValueError("Inspect max_tasks differs from execution policy")
+    if metadata.log_model_api is not policy.log_model_api:
+        raise ValueError("Inspect log must retain raw model API calls")
     if metadata.epochs != 1:
         raise ValueError("measured Inspect logs require exactly one epoch")
     revision = metadata.revision_commit
@@ -286,6 +321,7 @@ def _validate_system_log_metadata(
         for name, expected in expected_embedding_args.items():
             if task_args.get(name) != expected:
                 raise ValueError(f"Inspect vector task {name} differs from manifest")
+        _validate_vector_snapshot_task_arg(task_args)
 
     _validate_inspect_log_policy(
         metadata,
@@ -299,6 +335,10 @@ def _validate_system_log_metadata(
             # v0 has one shared concurrency pin; bind it to both task-level
             # and model-connection concurrency until those knobs are split.
             max_tasks=manifest.execution.concurrency,
+            model_base_url=None,
+            model_args=manifest.model.provider_args.model_dump(mode="python"),
+            max_retries=manifest.execution.max_retries,
+            log_model_api=manifest.execution.log_model_api,
             git_commit=manifest.git_commit,
         ),
     )
@@ -316,6 +356,20 @@ def _validate_system_log_metadata(
     if metadata.dataset_shuffled is not False:
         raise ValueError("measured Inspect datasets must be unshuffled")
     return task_name, repetition
+
+
+def _validate_vector_snapshot_task_arg(task_args: dict[str, Any]) -> None:
+    """Require proof that the measured vector task used an explicit local path."""
+
+    snapshot_path = task_args.get("embedding_snapshot_path")
+    if not isinstance(snapshot_path, str) or not snapshot_path.strip():
+        raise ValueError(
+            "Inspect vector task requires an explicit embedding_snapshot_path"
+        )
+    if not Path(snapshot_path).is_absolute():
+        raise ValueError(
+            "Inspect vector task embedding_snapshot_path must be an absolute local path"
+        )
 
 
 def _scenario_runs_from_eval_log(log: EvalLog) -> list[ScenarioRun]:
@@ -446,6 +500,12 @@ def _load_strict_eval_runs(
             scenario_ids=scenario_ids,
         )
         log_runs = _scenario_runs_from_eval_log(log)
+        _validate_openai_chat_completion_log(
+            log,
+            model_name=manifest.model.snapshot or "",
+            temperature=manifest.execution.temperature,
+            seed=manifest.execution.seeds[repetition - 1],
+        )
         _validate_hosted_warmup_attestation(log, log_runs)
         for run in log_runs:
             if (

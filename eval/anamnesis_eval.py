@@ -29,6 +29,7 @@ from anamnesis.io import (
     require_preregistered_final_dataset,
 )
 from anamnesis.preflight import (
+    MODEL_PREFLIGHT_PURPOSE,
     MODEL_PREFLIGHT_TASK_VERSION,
     validate_model_preflight_artifact,
 )
@@ -55,11 +56,12 @@ def model_preflight(seed: int = 101) -> Task:
             temperature=0.0,
             seed=seed,
             cache=False,
+            max_retries=0,
             max_connections=1,
             adaptive_connections=False,
         ),
         version=MODEL_PREFLIGHT_TASK_VERSION,
-        metadata={"purpose": "model-compatibility-preflight"},
+        metadata={"purpose": MODEL_PREFLIGHT_PURPOSE},
     )
 
 
@@ -170,13 +172,19 @@ def _system_task(
         expected_seed = frozen_manifest.execution.seeds[repetition - 1]
         if seed != expected_seed:
             raise ValueError(f"repetition {repetition} requires seed {expected_seed}")
-        if system == "vector_rag" and (
-            embedding_model != frozen_manifest.embedding.model
-            or embedding_repository != frozen_manifest.embedding.repository
-            or embedding_revision != frozen_manifest.embedding.revision
-            or top_k != frozen_manifest.embedding.top_k
-        ):
-            raise ValueError("vector embedding pin differs from the frozen manifest")
+        if system == "vector_rag":
+            if (
+                embedding_model != frozen_manifest.embedding.model
+                or embedding_repository != frozen_manifest.embedding.repository
+                or embedding_revision != frozen_manifest.embedding.revision
+                or top_k != frozen_manifest.embedding.top_k
+            ):
+                raise ValueError(
+                    "vector embedding pin differs from the frozen manifest"
+                )
+            embedding_snapshot_path = _require_local_embedding_snapshot(
+                embedding_snapshot_path
+            )
     manifest_sha256: str | None = None
     if frozen_manifest is not None and manifest is not None:
         manifest_bytes = Path(manifest).read_bytes()
@@ -228,6 +236,7 @@ def _system_task(
             temperature=0.0,
             seed=seed,
             cache=False,
+            max_retries=0,
             max_connections=1,
             adaptive_connections=False,
         ),
@@ -253,6 +262,21 @@ def _system_task(
             ),
         },
     )
+
+
+def _require_local_embedding_snapshot(snapshot_path: str | None) -> str:
+    """Require an explicit existing local artifact for a frozen vector run."""
+
+    if not isinstance(snapshot_path, str) or not snapshot_path.strip():
+        raise ValueError(
+            "frozen vector_rag requires an explicit embedding_snapshot_path"
+        )
+    path = Path(snapshot_path)
+    if not path.is_absolute():
+        raise ValueError("embedding_snapshot_path must be an absolute local path")
+    if not path.is_dir():
+        raise ValueError("embedding_snapshot_path is not an existing directory")
+    return str(path.resolve())
 
 
 @task

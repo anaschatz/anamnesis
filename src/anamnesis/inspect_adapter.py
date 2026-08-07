@@ -71,6 +71,7 @@ HOSTED_WARMUP_PROMPT = (
     "Synthetic Anamnesis setup warmup. This is not a user event or benchmark "
     'checkpoint. Return exactly {"actions":[]} using the supplied schema.'
 )
+OFFICIAL_OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 
 def hosted_warmup_prompt_sha256() -> str:
@@ -82,6 +83,18 @@ def hosted_warmup_schema_sha256() -> str:
         DecisionWire.model_json_schema(), sort_keys=True, separators=(",", ":")
     )
     return hashlib.sha256(serialized.encode()).hexdigest()
+
+
+def _verify_official_openai_endpoint(active_model: object, model_name: str) -> None:
+    """Reject explicit and environment-provided OpenAI endpoint overrides."""
+
+    if not model_name.startswith("openai/"):
+        raise ValueError("v0 requires the direct OpenAI provider")
+    api = getattr(active_model, "api", None)
+    client = getattr(api, "client", None)
+    base_url = getattr(client, "base_url", None)
+    if str(base_url).rstrip("/") != OFFICIAL_OPENAI_BASE_URL:
+        raise ValueError("active model is not using the official OpenAI endpoint")
 
 
 class ModelPreflightResult(StrictModel):
@@ -198,8 +211,9 @@ class InspectDecisionModel(DecisionModel):
     """Adapt Inspect's active model and Generate callback to DecisionModel."""
 
     def __init__(self, state: TaskState, generate: Generate) -> None:
-        get_model()  # Fail early if Inspect has no active model context.
+        active_model = get_model()  # Fail early without an active model context.
         self.name = str(state.model)
+        _verify_official_openai_endpoint(active_model, self.name)
         self.state = state
         self._generate = generate
         self._response_schema = _decision_schema(self.name)
@@ -579,7 +593,7 @@ def model_preflight_solver() -> Solver:
     return solve
 
 
-@scorer
+@scorer(metrics=[])
 def model_preflight_scorer() -> Scorer:
     """Score only compatibility, never reminder quality."""
 

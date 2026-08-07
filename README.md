@@ -24,12 +24,26 @@ contains:
   artifact guards; and
 - a synthetic hosted-model compatibility preflight.
 
-No empirical result is claimed yet. A frozen hosted model and pricing file have
-not been selected, so the required 35-scenario development baseline table has
-not been run. The existing 15-record holdout was inspected during development
-and is deliberately marked ineligible for hypothesis testing. A fresh,
-externally held and independently reviewed replacement is required after the
-system freeze. See [`eval/SCENARIO_PLAN.md`](eval/SCENARIO_PLAN.md).
+No empirical result is claimed yet. The first hosted candidate,
+[`openai/gpt-5.4-mini-2026-03-17`](https://developers.openai.com/api/docs/models/gpt-5.4-mini),
+was rejected before any API or scenario call because the installed Inspect
+Responses path could not preserve both seed and temperature-zero semantics. The
+preregistered next candidate is the dated
+[`openai/gpt-4.1-mini-2025-04-14`](https://developers.openai.com/api/docs/models/gpt-4.1-mini)
+snapshot, forced through Chat Completions with `responses_api=false` on the
+standard OpenAI endpoint. Its pricing is tracked in `eval/model_costs.json`, but
+it is not frozen or accepted until the live compatibility preflight passes. The
+FastEmbed artifact is pinned to repository
+`qdrant/bge-small-en-v1.5-onnx-q`, revision
+`52398278842ec682c6f32300af41344b1c0b0bb2`, and canonical tree SHA-256
+`d435d05b3411502ad9a280cc9ac0157f7bcd9f176df2fdc8971f788a121a02d7`.
+No scenario result was viewed during selection; an API key and the live
+preflight remain operational blockers, so the required 35-scenario development
+baseline has not run. The existing 15-record holdout
+was inspected during development and is deliberately marked ineligible for
+hypothesis testing. A fresh, externally held and independently reviewed
+replacement is required after the system freeze. See
+[`eval/SCENARIO_PLAN.md`](eval/SCENARIO_PLAN.md).
 
 ## Architecture
 
@@ -76,7 +90,7 @@ only. It must never receive the final sealed data.
 Use Python 3.11, 3.12, or 3.13:
 
 ```bash
-uv sync --extra dev --no-editable
+uv sync --frozen --extra dev --no-editable
 source .venv/bin/activate
 
 anamnesis-validate eval/scenarios/dev.jsonl
@@ -94,14 +108,16 @@ content is silently included.
 
 ## Freeze before measuring
 
-1. Run the synthetic `model_preflight` task on a hosted immutable snapshot. It
-   must pass both strict schemas and complete usage/cost accounting without a
-   repair call. Pin the resulting `.eval` file and its byte SHA-256 as
+1. Verify the tracked Inspect model-cost file for the exact hosted snapshot and
+   materialize the preregistered FastEmbed revision locally. Confirm that its
+   canonical artifact-tree hash matches the values in the manifest template.
+2. Commit the source tree and confirm the worktree is clean. The preflight log
+   must attest to this exact clean Git revision.
+3. Run the synthetic `model_preflight` task on the hosted immutable snapshot.
+   It must pass both strict schemas and complete usage/cost accounting without
+   a repair call. Pin the resulting `.eval` file and its byte SHA-256 as
    `model.preflight` in the experiment manifest.
-2. Pin an Inspect model-cost JSON/YAML file for that exact model identifier.
-3. Pin the FastEmbed Hugging Face repository to a 40-character commit SHA and
-   record the hash of the downloaded artifact tree.
-4. Commit the source tree, then copy
+4. Copy
    [`eval/experiment_manifest.template.json`](eval/experiment_manifest.template.json)
    to the ignored local path `eval/experiment.baseline.json` (or
    `eval/experiment.final.json` for the final phase). Fill every required
@@ -126,11 +142,18 @@ Example preflight:
 
 ```bash
 inspect eval eval/anamnesis_eval.py@model_preflight \
-  --model provider/immutable-snapshot \
+  --model openai/gpt-4.1-mini-2025-04-14 \
+  -M responses_api=false \
   --model-cost-config eval/model_costs.json \
-  --cache false --max-samples 1 --max-tasks 1 --max-connections 1 \
+  --temperature 0 --seed 101 --cache false --epochs 1 --max-retries 0 \
+  --max-samples 1 --max-tasks 1 --max-connections 1 \
+  --adaptive-connections false --log-model-api \
+  --log-format eval --log-dir results/runs --json \
   -T seed=101
 ```
+
+Set `OPENAI_API_KEY` in the local shell before running this command; never add
+the key to a manifest, log, source file, or commit.
 
 ## Development baseline gate
 
@@ -139,24 +162,36 @@ scenarios × one declared repetition (`seed=101`). Run all tasks from the same
 clean frozen baseline manifest:
 
 ```bash
+ANAMNESIS_FASTEMBED_PATH="$PWD/results/runs/fastembed/bge-small-en-v1.5-onnx-q/52398278842ec682c6f32300af41344b1c0b0bb2"
+
 inspect eval eval/anamnesis_eval.py@no_memory \
-  --model provider/immutable-snapshot \
+  --model openai/gpt-4.1-mini-2025-04-14 -M responses_api=false \
   --model-cost-config eval/model_costs.json \
-  --cache false --max-samples 1 --max-tasks 1 --max-connections 1 \
+  --temperature 0 --seed 101 --cache false --epochs 1 --max-retries 0 \
+  --max-samples 1 --max-tasks 1 --max-connections 1 \
+  --adaptive-connections false --log-model-api \
+  --log-format eval --log-dir results/runs/baseline \
   -T manifest=eval/experiment.baseline.json -T seed=101 -T repetition=1
 
 inspect eval eval/anamnesis_eval.py@full_context \
-  --model provider/immutable-snapshot \
+  --model openai/gpt-4.1-mini-2025-04-14 -M responses_api=false \
   --model-cost-config eval/model_costs.json \
-  --cache false --max-samples 1 --max-tasks 1 --max-connections 1 \
+  --temperature 0 --seed 101 --cache false --epochs 1 --max-retries 0 \
+  --max-samples 1 --max-tasks 1 --max-connections 1 \
+  --adaptive-connections false --log-model-api \
+  --log-format eval --log-dir results/runs/baseline \
   -T manifest=eval/experiment.baseline.json -T seed=101 -T repetition=1
 
 inspect eval eval/anamnesis_eval.py@vector_rag \
-  --model provider/immutable-snapshot \
+  --model openai/gpt-4.1-mini-2025-04-14 -M responses_api=false \
   --model-cost-config eval/model_costs.json \
-  --cache false --max-samples 1 --max-tasks 1 --max-connections 1 \
+  --temperature 0 --seed 101 --cache false --epochs 1 --max-retries 0 \
+  --max-samples 1 --max-tasks 1 --max-connections 1 \
+  --adaptive-connections false --log-model-api \
+  --log-format eval --log-dir results/runs/baseline \
   -T manifest=eval/experiment.baseline.json -T seed=101 -T repetition=1 \
-  -T embedding_revision=0123456789abcdef0123456789abcdef01234567
+  -T embedding_revision=52398278842ec682c6f32300af41344b1c0b0bb2 \
+  -T embedding_snapshot_path="$ANAMNESIS_FASTEMBED_PATH"
 ```
 
 Then generate the explicitly non-final development table:
@@ -166,7 +201,7 @@ anamnesis-report \
   --mode baseline \
   --manifest eval/experiment.baseline.json \
   --scenarios eval/scenarios/dev.jsonl \
-  --runs logs/*.eval \
+  --runs results/runs/baseline/*.eval \
   --csv results/development.csv \
   --markdown results/development.md
 ```
