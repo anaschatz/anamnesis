@@ -7,6 +7,15 @@ its [CSV](local_smoke.csv), [failure analysis](local_smoke_analysis.md), and
 hypothesis test and it rejected the current Qwen 4B compiler/prompt
 configuration before expansion to the development set.
 
+A separate gold-assisted [oracle-compiler ceiling](local_oracle_smoke.md), its
+[CSV](local_oracle_smoke.csv),
+[forensic analysis](local_oracle_smoke_analysis.md), and
+[provenance sidecar](local_oracle_smoke.provenance.json) isolate the writer from
+the deterministic memory and shared decision path. It achieved F1 87.5% (7 TP,
+1 FP, 1 FN) with zero obsolete-memory errors. It is a diagnostic, reports a
+decision-only token lower bound, and is neither a baseline nor a hypothesis
+test.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final

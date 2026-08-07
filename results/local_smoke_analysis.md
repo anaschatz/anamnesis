@@ -54,9 +54,9 @@ available.
 
 ## Next experiments, smoke data only
 
-1. Run the deterministic/oracle compiler ceiling on the same 10 cases. This is
-   diagnostic only; it separates memory-store/trigger errors from writer errors
-   and can never be reported as headline Anamnesis.
+1. The deterministic/oracle compiler ceiling is now complete. It produced all
+   8 correct due candidates; the shared decision model yielded 7 TP, 1 FP, and
+   1 FN. See [`local_oracle_smoke_analysis.md`](local_oracle_smoke_analysis.md).
 2. Add a writer-contract ablation that forbids paraphrasing canonical action
    slots and makes stable root-key copying explicit. Freeze it as a new prompt
    version before rerunning the smoke set.

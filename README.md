@@ -61,6 +61,20 @@ and [SHA-256 provenance sidecar](results/local_smoke.provenance.json). Exact
 model/blob hashes, server settings, commands, and claim limits are documented in
 [`eval/LOCAL_EXECUTION.md`](eval/LOCAL_EXECUTION.md).
 
+A subsequent gold-assisted oracle-compiler ceiling isolated the failure. The
+deterministic memory path produced all 8 correct due candidates, and the shared
+decision model converted 7 of them into scored true positives: 7 TP, 1 FP, 1 FN,
+F1 87.5%, and zero obsolete-memory errors. The remaining false alarm and miss
+were decision-policy errors, while exact provenance remained 0/7 because the
+current decision contract did not require copying the full causal evidence plus
+the current checkpoint. This diagnostic uses frozen human annotations, reports
+only a decision-token lower bound, and is not an Anamnesis result or hypothesis
+test.
+See the strict [oracle table](results/local_oracle_smoke.md),
+[CSV](results/local_oracle_smoke.csv),
+[analysis](results/local_oracle_smoke_analysis.md), and
+[provenance sidecar](results/local_oracle_smoke.provenance.json).
+
 Local latency is diagnostic only: the Ollama server was restarted before the
 Anamnesis task to clear an 8+ GiB warm prompt cache after macOS swap pressure.
 Accuracy, token, cost, prompt, schema, and raw-call accounting still pass the
