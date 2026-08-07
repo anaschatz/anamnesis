@@ -28,6 +28,7 @@ anamnesis-validate = "anamnesis.cli:validate_main"
 anamnesis-report = "anamnesis.cli:report_main"
 anamnesis-local-report = "anamnesis.local_report:local_report_main"
 anamnesis-oracle-report = "anamnesis.oracle_report:oracle_report_main"
+anamnesis-writer-report = "anamnesis.writer_report:writer_report_main"
 anamnesis-manifest = "anamnesis.manifest_cli:manifest_main"
 
 [tool.hatch.build.targets.wheel]

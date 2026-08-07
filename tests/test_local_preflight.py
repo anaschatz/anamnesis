@@ -70,8 +70,8 @@ def _compiler_completion() -> str:
                     "required_conditions": [],
                     "blockers": [],
                     "action_template": {
-                        "payload": {"subject": "run the compatibility check"},
-                        "summary": "Run the compatibility check.",
+                        "payload": {"subject": "perform compatibility check"},
+                        "summary": "Perform compatibility check.",
                     },
                 }
             ],
@@ -289,8 +289,8 @@ def test_local_preflight_log_rejects_drift(tamper: str, expected: str) -> None:
                 "actions": [
                     {
                         "action_key": "local-preflight-event",
-                        "payload": {"subject": "run the compatibility check"},
-                        "summary": "Run the compatibility check.",
+                        "payload": {"subject": "perform compatibility check"},
+                        "summary": "Perform compatibility check.",
                         "evidence_event_ids": ["local-preflight-event"],
                     }
                 ],

@@ -164,6 +164,7 @@ def _validated_local_manifest(
     seed: int | None,
     repetition: int,
     ollama_models_dir: str | None,
+    required_phase: str | None = None,
 ) -> tuple[LocalExperimentManifest, str, Path]:
     if manifest_path is None:
         raise ValueError("local scenario tasks require a frozen local manifest")
@@ -174,6 +175,8 @@ def _validated_local_manifest(
     manifest = LocalExperimentManifest.model_validate_json(manifest_bytes)
     if manifest.status != "frozen":
         raise ValueError("local scenario tasks require a frozen local manifest")
+    if required_phase is not None and manifest.phase != required_phase:
+        raise ValueError(f"local task requires phase {required_phase}")
     if system not in manifest.systems:
         raise ValueError("system is outside the frozen local matrix")
     if repetition < 1 or repetition > manifest.execution.repetitions:
@@ -280,6 +283,7 @@ def _system_task(
     ollama_models_dir: str | None,
     embedding_snapshot_path: str | None = None,
     oracle_annotations_path: str | None = None,
+    required_phase: str | None = None,
 ) -> Task:
     frozen, manifest_sha256, dataset_path = _validated_local_manifest(
         manifest,
@@ -287,6 +291,7 @@ def _system_task(
         seed=seed,
         repetition=repetition,
         ollama_models_dir=ollama_models_dir,
+        required_phase=required_phase,
     )
     if system == "vector_rag":
         embedding_snapshot_path = _require_local_embedding_snapshot(
@@ -449,6 +454,24 @@ def local_anamnesis(
         repetition=repetition,
         manifest=manifest,
         ollama_models_dir=ollama_models_dir,
+        required_phase="smoke",
+    )
+
+
+@task
+def local_anamnesis_writer_diagnostic(
+    seed: int | None = None,
+    repetition: int = 1,
+    manifest: str | None = None,
+    ollama_models_dir: str | None = None,
+) -> Task:
+    return _system_task(
+        "anamnesis",
+        seed=seed,
+        repetition=repetition,
+        manifest=manifest,
+        ollama_models_dir=ollama_models_dir,
+        required_phase="writer_diagnostic",
     )
 
 
@@ -467,4 +490,5 @@ def local_anamnesis_oracle_compiler(
         manifest=manifest,
         ollama_models_dir=ollama_models_dir,
         oracle_annotations_path=oracle_annotations_path,
+        required_phase="oracle_smoke",
     )

@@ -7,9 +7,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import anamnesis.local_experiment as local_experiment
 from anamnesis.local_experiment import (
     LOCAL_BASE_URL,
     LOCAL_MODEL_ID,
+    LOCAL_WRITER_REFERENCE_PATH,
+    LOCAL_WRITER_REFERENCE_SHA256,
     LocalExperimentManifest,
     OllamaArtifactPin,
     require_local_only_environment,
@@ -19,6 +22,7 @@ from anamnesis.local_experiment import (
 from anamnesis.oracle import ORACLE_SYSTEM_NAME
 
 TEMPLATE = Path("eval/local_experiment_manifest.template.json")
+WRITER_TEMPLATE = Path("eval/local_writer_experiment_manifest.template.json")
 MODEL_PIN = Path("eval/ollama_qwen3_4b_instruct.pin.json")
 HASH = "a" * 64
 COMMIT = "b" * 40
@@ -40,6 +44,16 @@ def _oracle_raw(*, annotation_sha256: str | None = HASH) -> dict[str, object]:
     model = raw["model"]
     assert isinstance(model, dict)
     model["same_model_for_compiler_and_decision"] = False
+    return raw
+
+
+def _writer_raw(
+    *, reference_sha256: str | None = LOCAL_WRITER_REFERENCE_SHA256
+) -> dict[str, object]:
+    raw = json.loads(WRITER_TEMPLATE.read_text(encoding="utf-8"))
+    reference = raw["writer_reference"]
+    assert isinstance(reference, dict)
+    reference["sha256"] = reference_sha256
     return raw
 
 
@@ -103,6 +117,26 @@ def test_local_oracle_smoke_is_a_distinct_single_system_phase() -> None:
     assert manifest.oracle_annotations.sha256 == HASH
 
 
+def test_local_writer_template_is_a_distinct_single_system_phase() -> None:
+    manifest = LocalExperimentManifest.model_validate_json(
+        WRITER_TEMPLATE.read_text(encoding="utf-8")
+    )
+
+    assert manifest.phase == "writer_diagnostic"
+    assert manifest.systems == ["anamnesis"]
+    assert manifest.scenario_count == 10
+    assert manifest.dataset.path == "eval/scenarios/writer_diagnostic.v1.jsonl"
+    assert manifest.execution.seeds == [101]
+    assert manifest.execution.repetitions == 1
+    assert manifest.compiler_mode == "llm"
+    assert manifest.model.same_model_for_compiler_and_decision is True
+    assert manifest.writer_reference is not None
+    assert manifest.writer_reference.path == LOCAL_WRITER_REFERENCE_PATH
+    assert manifest.writer_reference.sha256 == LOCAL_WRITER_REFERENCE_SHA256
+
+    verify_static_local_inputs(manifest, repo_root=Path.cwd())
+
+
 def test_local_oracle_annotations_are_required_only_for_oracle_smoke() -> None:
     missing = _oracle_raw()
     missing.pop("oracle_annotations")
@@ -116,6 +150,57 @@ def test_local_oracle_annotations_are_required_only_for_oracle_smoke() -> None:
     }
     with pytest.raises(ValidationError, match="only valid"):
         LocalExperimentManifest.model_validate(smoke)
+
+
+def test_local_writer_reference_is_required_only_for_writer_diagnostic() -> None:
+    missing = _writer_raw()
+    missing.pop("writer_reference")
+    with pytest.raises(ValidationError, match="requires writer_reference"):
+        LocalExperimentManifest.model_validate(missing)
+
+    smoke = _template_raw()
+    smoke["writer_reference"] = {
+        "path": "eval/oracle/writer_diagnostic_memory_deltas.v1.json",
+        "sha256": HASH,
+    }
+    with pytest.raises(ValidationError, match="only valid"):
+        LocalExperimentManifest.model_validate(smoke)
+
+
+def test_measured_static_verifier_does_not_resolve_writer_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = LocalExperimentManifest.model_validate(_writer_raw())
+    repo_file = local_experiment._repo_file
+
+    def guarded_repo_file(repo_root: Path, relative_path: str) -> Path:
+        if relative_path == LOCAL_WRITER_REFERENCE_PATH:
+            raise AssertionError("measured verifier resolved writer reference")
+        return repo_file(repo_root, relative_path)
+
+    monkeypatch.setattr(local_experiment, "_repo_file", guarded_repo_file)
+
+    verify_static_local_inputs(manifest, repo_root=Path.cwd())
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("path", "eval/oracle/other.json", "writer_reference.path"),
+        ("sha256", HASH, "writer_reference.sha256"),
+        ("sha256", None, "writer_reference.sha256"),
+    ],
+)
+def test_local_writer_reference_pin_cannot_drift(
+    field: str, value: object, expected: str
+) -> None:
+    raw = _writer_raw()
+    reference = raw["writer_reference"]
+    assert isinstance(reference, dict)
+    reference[field] = value
+
+    with pytest.raises(ValidationError, match=expected):
+        LocalExperimentManifest.model_validate(raw)
 
 
 def test_compiler_mode_and_same_model_claim_are_phase_locked() -> None:
@@ -162,6 +247,14 @@ def test_compiler_mode_and_same_model_claim_are_phase_locked() -> None:
     with pytest.raises(ValidationError, match="compiler_mode=llm"):
         LocalExperimentManifest.model_validate(baseline)
 
+    writer = _writer_raw()
+    writer["compiler_mode"] = "oracle"
+    writer_model = writer["model"]
+    assert isinstance(writer_model, dict)
+    writer_model["same_model_for_compiler_and_decision"] = False
+    with pytest.raises(ValidationError, match="compiler_mode=llm"):
+        LocalExperimentManifest.model_validate(writer)
+
 
 @pytest.mark.parametrize(
     ("field", "value"),
@@ -185,6 +278,14 @@ def test_frozen_local_oracle_requires_annotation_hash() -> None:
     raw["status"] = "frozen"
 
     with pytest.raises(ValidationError, match="oracle_annotations.sha256"):
+        LocalExperimentManifest.model_validate(raw)
+
+
+def test_frozen_local_writer_requires_reference_hash() -> None:
+    raw = _writer_raw(reference_sha256=None)
+    raw["status"] = "frozen"
+
+    with pytest.raises(ValidationError, match="writer_reference.sha256"):
         LocalExperimentManifest.model_validate(raw)
 
 
@@ -297,6 +398,23 @@ def test_complete_frozen_smoke_manifest_is_accepted() -> None:
 )
 def test_local_smoke_matrix_cannot_drift(field: str, value: object) -> None:
     raw = _template_raw()
+    raw[field] = value
+
+    with pytest.raises(ValidationError):
+        LocalExperimentManifest.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("scenario_count", 11),
+        ("sealed_opened", True),
+        ("systems", ["no_memory", "anamnesis"]),
+        ("dataset", {"path": "eval/scenarios/smoke.jsonl", "sha256": HASH}),
+    ],
+)
+def test_local_writer_matrix_cannot_drift(field: str, value: object) -> None:
+    raw = _writer_raw()
     raw[field] = value
 
     with pytest.raises(ValidationError):

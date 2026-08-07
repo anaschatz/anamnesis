@@ -26,11 +26,16 @@ LOCAL_PRICING_PATH = "eval/local_model_costs.json"
 LOCAL_PRICING_SHA256 = (
     "c185e2fad06d6bd2abaaf0be81a1720fc245555fa2a477c1b1bea558b28c2f74"
 )
+LOCAL_WRITER_REFERENCE_PATH = "eval/oracle/writer_diagnostic_memory_deltas.v1.json"
+LOCAL_WRITER_REFERENCE_SHA256 = (
+    "93c24d604b32c838d635f9c9ed4fea20f770da254f522db6962b6bc57a232057"
+)
 LOCAL_OLLAMA_VERSION = "0.31.1"
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 LOCAL_SMOKE_SYSTEMS = FINAL_SYSTEMS
 LOCAL_ORACLE_SMOKE_SYSTEMS = {ORACLE_SYSTEM_NAME}
+LOCAL_WRITER_DIAGNOSTIC_SYSTEMS = {"anamnesis"}
 LOCAL_SMOKE_SEEDS = [101]
 
 
@@ -163,7 +168,7 @@ class LocalExperimentManifest(StrictModel):
     claim_scope: Literal["diagnostic_development_only"] = "diagnostic_development_only"
     hypothesis_test_eligible: Literal[False] = False
     status: Literal["draft", "frozen"] = "draft"
-    phase: Literal["smoke", "baseline", "oracle_smoke"]
+    phase: Literal["smoke", "baseline", "oracle_smoke", "writer_diagnostic"]
     compiler_mode: Literal["llm", "oracle"] = "llm"
     dataset: ArtifactPin
     scenario_count: int = Field(ge=1)
@@ -180,6 +185,7 @@ class LocalExperimentManifest(StrictModel):
     research_contract: ArtifactPin
     architecture_contract: ArtifactPin
     oracle_annotations: ArtifactPin | None = None
+    writer_reference: ArtifactPin | None = None
     decision_prompt_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     decision_schema_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     memory_compiler_prompt_sha256: str | None = Field(
@@ -213,6 +219,13 @@ class LocalExperimentManifest(StrictModel):
                 "sealed": False,
                 "seeds": LOCAL_SMOKE_SEEDS,
                 "dataset": "eval/scenarios/smoke.jsonl",
+            },
+            "writer_diagnostic": {
+                "systems": LOCAL_WRITER_DIAGNOSTIC_SYSTEMS,
+                "count": 10,
+                "sealed": False,
+                "seeds": LOCAL_SMOKE_SEEDS,
+                "dataset": "eval/scenarios/writer_diagnostic.v1.jsonl",
             },
         }[self.phase]
 
@@ -271,6 +284,26 @@ class LocalExperimentManifest(StrictModel):
                 f"local {self.phase} requires same_model_for_compiler_and_decision=true"
             )
 
+        if self.phase == "writer_diagnostic":
+            if self.writer_reference is None:
+                raise ValueError(
+                    "local writer_diagnostic phase requires writer_reference"
+                )
+            if self.writer_reference.path != LOCAL_WRITER_REFERENCE_PATH:
+                raise ValueError(
+                    "local writer_diagnostic writer_reference.path must be "
+                    f"{LOCAL_WRITER_REFERENCE_PATH}"
+                )
+            if self.writer_reference.sha256 != LOCAL_WRITER_REFERENCE_SHA256:
+                raise ValueError(
+                    "local writer_diagnostic writer_reference.sha256 must be "
+                    f"{LOCAL_WRITER_REFERENCE_SHA256}"
+                )
+        elif self.writer_reference is not None:
+            raise ValueError(
+                "writer_reference is only valid for local writer_diagnostic"
+            )
+
         invalid_hashes = {
             name: digest
             for name, digest in self.system_config_sha256.items()
@@ -306,6 +339,11 @@ class LocalExperimentManifest(StrictModel):
                 missing.append("oracle_annotations")
             elif self.oracle_annotations.sha256 is None:
                 missing.append("oracle_annotations.sha256")
+        if self.phase == "writer_diagnostic":
+            if self.writer_reference is None:
+                missing.append("writer_reference")
+            elif self.writer_reference.sha256 is None:
+                missing.append("writer_reference.sha256")
         for name in ("git_commit", "decision_prompt_sha256", "decision_schema_sha256"):
             if getattr(self, name) is None:
                 missing.append(name)
@@ -412,6 +450,10 @@ def verify_static_local_inputs(
     )
     if manifest.oracle_annotations is not None:
         artifacts = (*artifacts, manifest.oracle_annotations)
+    # writer_reference is a gold-derived reporter input. The manifest schema
+    # locks its declaration, but this measured-input verifier deliberately does
+    # not resolve, open, or hash the referenced bytes; the strict writer
+    # reporter owns that validation.
     for artifact in artifacts:
         if artifact.sha256 is None:
             if manifest.status == "frozen":
@@ -517,6 +559,8 @@ __all__ = [
     "LOCAL_OLLAMA_VERSION",
     "LOCAL_PRICING_PATH",
     "LOCAL_PRICING_SHA256",
+    "LOCAL_WRITER_REFERENCE_PATH",
+    "LOCAL_WRITER_REFERENCE_SHA256",
     "LocalExperimentManifest",
     "OllamaArtifactPin",
     "load_ollama_artifact_pin",

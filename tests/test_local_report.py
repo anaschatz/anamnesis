@@ -86,8 +86,8 @@ PREFLIGHT_COMPILER_COMPLETION = json.dumps(
                 "required_conditions": [],
                 "blockers": [],
                 "action_template": {
-                    "payload": {"subject": "run the compatibility check"},
-                    "summary": "Run the compatibility check.",
+                    "payload": {"subject": "perform compatibility check"},
+                    "summary": "Perform compatibility check.",
                 },
             }
         ],

@@ -678,8 +678,8 @@ def test_semantic_preflight_requires_17h_intent_and_no_current_action() -> None:
                     "required_conditions": [],
                     "blockers": [],
                     "action_template": {
-                        "payload": {"subject": "run the compatibility check"},
-                        "summary": "Run the compatibility check.",
+                        "payload": {"subject": "perform compatibility check"},
+                        "summary": "Perform compatibility check.",
                     },
                 }
             ],

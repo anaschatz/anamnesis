@@ -698,7 +698,7 @@ def _compiler_preflight_semantics(call: CompilerCall) -> bool:
         and not mutation.blockers
         and mutation.action_template.kind == "reminder"
         and mutation.action_template.payload
-        == {"subject": "run the compatibility check"}
+        == {"subject": "perform compatibility check"}
     )
 
 
@@ -716,7 +716,7 @@ async def run_local_model_preflight(
         id="local-preflight-event",
         at=datetime.fromisoformat("2026-01-05T09:00:00+00:00"),
         kind="user_message",
-        text="At 17:00 today remind me to run the compatibility check.",
+        text="At 17:00 today remind me to perform compatibility check.",
     )
     compiler_call = await compiler.compile(
         CompilerRequest(event=event, active_state='{"facts":[],"intents":[]}')

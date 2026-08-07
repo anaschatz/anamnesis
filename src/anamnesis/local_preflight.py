@@ -45,7 +45,7 @@ def local_preflight_event() -> ObservableEvent:
         id=LOCAL_PREFLIGHT_EVENT_ID,
         at="2026-01-05T09:00:00+00:00",
         kind="user_message",
-        text="At 17:00 today remind me to run the compatibility check.",
+        text="At 17:00 today remind me to perform compatibility check.",
     )
 
 
