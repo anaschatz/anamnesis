@@ -75,11 +75,26 @@ See the strict [oracle table](results/local_oracle_smoke.md),
 [analysis](results/local_oracle_smoke_analysis.md), and
 [provenance sidecar](results/local_oracle_smoke.provenance.json).
 
-Local latency is diagnostic only: the Ollama server was restarted before the
-Anamnesis task to clear an 8+ GiB warm prompt cache after macOS swap pressure.
-Accuracy, token, cost, prompt, schema, and raw-call accounting still pass the
-strict reporter, but cross-system latency should not be interpreted as a fair
-benchmark from this run.
+The preregistered D1 shared decision-prompt ablation has also completed on the
+same four-system smoke matrix. It reduced each simple baseline's false alarms
+from one to zero, but every system still had recall and F1 0. Anamnesis remained
+at 7 false reminders and 2 invalid compiler outputs, used 95,282 total input
+tokens versus 79,922 for D1 full-context, and therefore failed the frozen D1
+promotion gate. All 53 compiler-call outputs, deltas, accounting records, and
+due-candidate IDs were unchanged from D0: only one of eight gold checkpoints had
+a due candidate, and that candidate had the wrong canonical payload. D1 is
+rejected, and no D2 will be tuned on these same smoke cases. See the
+[D1 table](results/local_smoke_d1.md),
+[CSV](results/local_smoke_d1.csv),
+[analysis](results/local_smoke_d1_analysis.md), and
+[provenance sidecar](results/local_smoke_d1.provenance.json).
+
+Both local latency sets are diagnostic only. In D0, the Ollama server was
+restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap
+pressure. In D1, all four tasks stayed in one process, whose prompt cache grew
+to roughly 7 GiB and again coincided with disk/swap pressure. Accuracy, token,
+cost, prompt, schema, and raw-call accounting pass the strict reporters, but
+cross-system latency should not be interpreted as a fair benchmark.
 
 ## Architecture
 

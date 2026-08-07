@@ -107,6 +107,12 @@ is shared, a fair four-system rerun is required before comparing it with the
 original local smoke matrix. No 35-scenario run should occur until that smoke
 ablation is complete.
 
+That D1 matrix is now complete and failed its frozen promotion gate. The regular
+Anamnesis writer produced the same erroneous compiler trace as D0, so the
+decision prompt had only one gold-timed candidate to act on, with a noncanonical
+payload. See [`local_smoke_d1_analysis.md`](local_smoke_d1_analysis.md). No D2
+will be tuned on these same smoke cases.
+
 ## Latency limitation
 
 Latency remains operationally diagnostic only. The oracle artifact load is a

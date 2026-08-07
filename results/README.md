@@ -16,6 +16,15 @@ the deterministic memory and shared decision path. It achieved F1 87.5% (7 TP,
 decision-only token lower bound, and is neither a baseline nor a hypothesis
 test.
 
+The post-hoc, preregistered [D1 shared decision-prompt ablation](local_smoke_d1.md)
+is published with its [CSV](local_smoke_d1.csv),
+[analysis](local_smoke_d1_analysis.md), and
+[provenance sidecar](local_smoke_d1.provenance.json). All four systems still
+scored F1 0. The simple baselines produced no false alarms, but Anamnesis kept 7
+false reminders and 2 invalid compiler outputs and failed the frozen promotion
+gate. D1 is rejected; it is not a hypothesis test and does not authorize a
+35-scenario run.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final

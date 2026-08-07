@@ -52,22 +52,20 @@ compile canonical memory records, and the shared 4B decision model does not
 reliably preserve the benchmark action contract even when relevant context is
 available.
 
-## Next experiments, smoke data only
+## Subsequent experiments and stopping decision
 
 1. The deterministic/oracle compiler ceiling is now complete. It produced all
    8 correct due candidates; the shared decision model yielded 7 TP, 1 FP, and
    1 FN. See [`local_oracle_smoke_analysis.md`](local_oracle_smoke_analysis.md).
-2. Add a writer-contract ablation that forbids paraphrasing canonical action
-   slots and makes stable root-key copying explicit. Freeze it as a new prompt
-   version before rerunning the smoke set.
-3. Add a shared decision-contract ablation for all four systems, not just
-   Anamnesis, to test whether canonical payload/key failures are caused by the
-   common action policy rather than memory.
-4. If the 4B model still produces invalid deltas or F1 0, reject it and test one
-   stronger local model that fits the same hardware. Pin its exact blobs and
-   create a new preflight/manifest; do not reuse these results.
-5. Proceed to the 35 development scenarios only after a smoke configuration
-   produces non-zero recall and passes the strict reporter without repair calls.
+2. The shared D1 decision-contract ablation is now complete for all four
+   systems. It reduced simple-baseline false alarms but left every system at F1
+   0 and failed its promotion gate. See
+   [`local_smoke_d1_analysis.md`](local_smoke_d1_analysis.md).
+3. Stop tuning prompts on these 10 smoke cases. A writer intervention or
+   stronger local model now requires newly authored diagnostic cases, exact
+   artifact pins, a fresh preflight, and a new frozen manifest.
+4. Proceed to the 35 development scenarios only after a fresh smoke candidate
+   produces non-zero recall and passes its declared gate without repair calls.
 
 ## Latency limitation
 
