@@ -53,6 +53,7 @@ from anamnesis.schema import Decision, PredictedAction, Scenario, ScenarioRun, U
 from anamnesis.scoring import AggregateResult, aggregate_results, score_scenario
 
 LOCAL_SMOKE_TITLE = "Local smoke diagnostic — not a hypothesis test"
+LOCAL_SMOKE_PROVENANCE_PATH = Path("results/local_smoke.provenance.json")
 LOCAL_TASK_FILE = Path("eval/anamnesis_local_eval.py")
 LOCAL_SMOKE_DATASET_NAME = "anamnesis-local-smoke-v0"
 LOCAL_SYSTEM_TASKS = {
@@ -61,11 +62,59 @@ LOCAL_SYSTEM_TASKS = {
     "vector_rag": "local_vector_rag",
     "anamnesis": "local_anamnesis",
 }
-REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _discover_repo_root(start: Path | None = None) -> Path:
+    """Find the checkout root even when this module is installed non-editably."""
+
+    current = (start or Path.cwd()).resolve()
+    for candidate in (current, *current.parents):
+        if (
+            (candidate / "pyproject.toml").is_file()
+            and (candidate / "RESEARCH.md").is_file()
+            and (candidate / "eval").is_dir()
+        ):
+            return candidate
+    source_candidate = Path(__file__).resolve().parents[2]
+    if (source_candidate / "pyproject.toml").is_file() and (
+        source_candidate / "RESEARCH.md"
+    ).is_file():
+        return source_candidate
+    raise RuntimeError("run anamnesis-local-report from inside the repository")
+
+
+REPO_ROOT = _discover_repo_root()
 
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _repo_relative_path(
+    path: Path,
+    *,
+    label: str,
+    must_exist: bool = True,
+) -> str:
+    """Return a non-identifying repository path or reject external artifacts."""
+
+    resolved = path.resolve()
+    if not resolved.is_relative_to(REPO_ROOT):
+        raise ValueError(
+            f"{label} must be inside the repository; external paths are not "
+            "recorded in the provenance sidecar"
+        )
+    if must_exist and not resolved.is_file():
+        raise ValueError(f"{label} does not exist or is not a file: {path}")
+    return resolved.relative_to(REPO_ROOT).as_posix()
 
 
 def _repo_artifact(relative: str) -> Path:
@@ -81,6 +130,23 @@ def _repo_artifact(relative: str) -> Path:
 def _resolve_logged_repo_path(value: str) -> Path:
     path = Path(value)
     return path.resolve() if path.is_absolute() else (REPO_ROOT / path).resolve()
+
+
+def _logged_dataset_candidates(value: str) -> set[Path]:
+    """Resolve both repository-relative and Inspect task-relative locations."""
+
+    path = Path(value)
+    if path.is_absolute():
+        return {path.resolve()}
+    if ".." in path.parts:
+        raise ValueError("local log dataset location cannot escape the repository")
+    candidates = {
+        (REPO_ROOT / path).resolve(),
+        ((REPO_ROOT / LOCAL_TASK_FILE).parent / path).resolve(),
+    }
+    if any(not candidate.is_relative_to(REPO_ROOT) for candidate in candidates):
+        raise ValueError("local log dataset location cannot escape the repository")
+    return candidates
 
 
 def _verify_current_git_state(
@@ -312,9 +378,8 @@ def _validate_task_and_dataset(
     dataset = spec.dataset
     if dataset.name != LOCAL_SMOKE_DATASET_NAME:
         raise ValueError("local log dataset name differs from the smoke protocol")
-    if (
-        dataset.location is None
-        or _resolve_logged_repo_path(dataset.location) != scenarios_path.resolve()
+    if dataset.location is None or scenarios_path.resolve() not in (
+        _logged_dataset_candidates(dataset.location)
     ):
         raise ValueError("local log dataset location differs from --scenarios")
     if dataset.samples != 10:
@@ -577,9 +642,14 @@ def _validate_run_and_events(
         raise ValueError("local ScenarioRun cannot contain hosted warmup evidence")
     if not run.usage_complete or not run.cost_complete:
         raise ValueError("local ScenarioRun has incomplete usage or cost")
-    for usage in (run.usage, run.decision_usage, run.compiler_usage):
-        if usage.cost_usd != 0.0:
-            raise ValueError("local ScenarioRun does not have exact zero API cost")
+    if run.usage.cost_usd != 0.0 or run.decision_usage.cost_usd != 0.0:
+        raise ValueError("local ScenarioRun does not have exact zero API cost")
+    compiler_was_called = any(item.compiler_called for item in run.checkpoints)
+    if compiler_was_called:
+        if run.compiler_usage.cost_usd != 0.0:
+            raise ValueError("local compiler usage does not have exact zero API cost")
+    elif run.compiler_usage != Usage():
+        raise ValueError("baseline without compiler calls has non-empty compiler usage")
     if run.decision_usage.input_tokens <= 0:
         raise ValueError("local ScenarioRun has no decision input usage")
 
@@ -827,6 +897,130 @@ def _render_markdown(results: list[AggregateResult]) -> str:
     )
 
 
+def _validate_provenance_locations(
+    *,
+    manifest_path: Path,
+    scenarios_path: Path,
+    run_paths: Sequence[Path],
+    csv_path: Path,
+    markdown_path: Path,
+    provenance_path: Path,
+) -> None:
+    """Fail before reporting if a sidecar would expose or overwrite a path."""
+
+    source_paths = [manifest_path, scenarios_path, *run_paths]
+    for index, path in enumerate(source_paths):
+        _repo_relative_path(path, label=f"provenance source {index + 1}")
+
+    target_paths = [csv_path, markdown_path, provenance_path]
+    for index, path in enumerate(target_paths):
+        _repo_relative_path(
+            path,
+            label=f"result artifact {index + 1}",
+            must_exist=False,
+        )
+
+    resolved_sources = {path.resolve() for path in source_paths}
+    resolved_targets = [path.resolve() for path in target_paths]
+    if len(set(resolved_targets)) != len(resolved_targets):
+        raise ValueError("CSV, Markdown, and provenance paths must be distinct")
+    if resolved_sources.intersection(resolved_targets):
+        raise ValueError("result artifacts cannot overwrite provenance sources")
+
+
+def _write_result_provenance(
+    path: Path,
+    *,
+    manifest: LocalExperimentManifest,
+    manifest_path: Path,
+    manifest_sha256: str,
+    scenarios_path: Path,
+    run_paths: Sequence[Path],
+    expected_run_sha256: Sequence[str],
+    csv_path: Path,
+    markdown_path: Path,
+) -> None:
+    """Write the last artifact, binding validated inputs to rendered outputs."""
+
+    _validate_provenance_locations(
+        manifest_path=manifest_path,
+        scenarios_path=scenarios_path,
+        run_paths=run_paths,
+        csv_path=csv_path,
+        markdown_path=markdown_path,
+        provenance_path=path,
+    )
+    if manifest.git_commit is None:
+        raise ValueError("frozen local manifest is missing git_commit")
+    if _sha256_file(manifest_path) != manifest_sha256:
+        raise ValueError("frozen local manifest changed while reporting")
+
+    dataset_digest = _sha256_file(scenarios_path)
+    if dataset_digest != manifest.dataset.sha256:
+        raise ValueError("scenario dataset differs from the frozen manifest")
+
+    if len(run_paths) != 4 or len(expected_run_sha256) != 4:
+        raise ValueError("provenance requires exactly four input .eval logs")
+    run_records: list[dict[str, str]] = []
+    for index, (run_path, expected_digest) in enumerate(
+        zip(run_paths, expected_run_sha256, strict=True),
+        start=1,
+    ):
+        actual_digest = _sha256_file(run_path)
+        if actual_digest != expected_digest:
+            raise ValueError(f"input .eval log {index} changed while reporting")
+        run_records.append(
+            {
+                "path": _repo_relative_path(
+                    run_path,
+                    label=f"input .eval log {index}",
+                ),
+                "sha256": actual_digest,
+            }
+        )
+
+    payload = {
+        "schema_version": 1,
+        "artifact": "anamnesis_local_smoke_result_provenance",
+        "title": LOCAL_SMOKE_TITLE,
+        "hypothesis_test_eligible": False,
+        "source_git_commit": manifest.git_commit,
+        "frozen_manifest": {
+            "path": _repo_relative_path(
+                manifest_path,
+                label="frozen manifest",
+            ),
+            "sha256": manifest_sha256,
+        },
+        "scenario_dataset": {
+            "path": _repo_relative_path(
+                scenarios_path,
+                label="scenario dataset",
+            ),
+            "sha256": dataset_digest,
+        },
+        "input_eval_logs": run_records,
+        "outputs": {
+            "csv": {
+                "path": _repo_relative_path(csv_path, label="CSV output"),
+                "sha256": _sha256_file(csv_path),
+            },
+            "markdown": {
+                "path": _repo_relative_path(
+                    markdown_path,
+                    label="Markdown output",
+                ),
+                "sha256": _sha256_file(markdown_path),
+            },
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def local_report_main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Validate and score the strict local smoke diagnostic"
@@ -840,8 +1034,22 @@ def local_report_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--runs", type=Path, nargs=4, required=True)
     parser.add_argument("--csv", type=Path, default=Path("results/local_smoke.csv"))
     parser.add_argument("--markdown", type=Path, default=Path("results/local_smoke.md"))
+    parser.add_argument(
+        "--provenance",
+        type=Path,
+        default=LOCAL_SMOKE_PROVENANCE_PATH,
+    )
     args = parser.parse_args(argv)
 
+    _validate_provenance_locations(
+        manifest_path=args.manifest,
+        scenarios_path=args.scenarios,
+        run_paths=args.runs,
+        csv_path=args.csv,
+        markdown_path=args.markdown,
+        provenance_path=args.provenance,
+    )
+    run_sha256 = [_sha256_file(path) for path in args.runs]
     manifest, scenarios, manifest_sha256 = _validate_frozen_local_manifest(
         manifest_path=args.manifest,
         scenarios_path=args.scenarios,
@@ -888,11 +1096,23 @@ def local_report_main(argv: Sequence[str] | None = None) -> int:
     rendered = _render_markdown(results)
     args.markdown.parent.mkdir(parents=True, exist_ok=True)
     args.markdown.write_text(rendered, encoding="utf-8")
+    _write_result_provenance(
+        args.provenance,
+        manifest=manifest,
+        manifest_path=args.manifest,
+        manifest_sha256=manifest_sha256,
+        scenarios_path=args.scenarios,
+        run_paths=args.runs,
+        expected_run_sha256=run_sha256,
+        csv_path=args.csv,
+        markdown_path=args.markdown,
+    )
     print(rendered, end="")
     return 0
 
 
 __all__ = [
+    "LOCAL_SMOKE_PROVENANCE_PATH",
     "LOCAL_SMOKE_TITLE",
     "local_report_main",
 ]

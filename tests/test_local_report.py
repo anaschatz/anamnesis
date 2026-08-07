@@ -29,15 +29,21 @@ from inspect_ai.model._openai import openai_completion_params
 from anamnesis.io import canonical_sha256, dataset_sha256, load_scenarios
 from anamnesis.local_experiment import LocalExperimentManifest
 from anamnesis.local_report import (
+    LOCAL_SMOKE_PROVENANCE_PATH,
     LOCAL_SMOKE_TITLE,
     LOCAL_SYSTEM_TASKS,
+    _discover_repo_root,
     _expected_system_hashes,
     _expected_vector_retrieval_usage,
     _load_local_smoke_runs,
+    _logged_dataset_candidates,
     _render_markdown,
+    _repo_relative_path,
+    _sha256_file,
     _sha256_text,
     _validate_frozen_local_manifest,
     _write_csv,
+    _write_result_provenance,
 )
 from anamnesis.local_runtime import (
     LOCAL_DECISION_VERSION,
@@ -98,6 +104,16 @@ EMPTY_COMPILER_COMPLETION = json.dumps(
     }
 )
 NO_ACTION_COMPLETION = '{"mode":"no_action","actions":[]}'
+
+
+def test_local_report_discovers_checkout_from_a_subdirectory() -> None:
+    assert _discover_repo_root(Path("eval/scenarios")) == Path.cwd().resolve()
+
+
+def test_logged_dataset_location_accepts_real_inspect_task_relative_shape() -> None:
+    assert SCENARIOS_PATH.resolve() in _logged_dataset_candidates(
+        "scenarios/smoke.jsonl"
+    )
 
 
 def _usage(calls: int = 1) -> Usage:
@@ -251,7 +267,7 @@ def _sample(
     for authored in scenario.events:
         observable = authored.to_observable()
         compiler_called = system == "anamnesis" and authored.kind != "clock_tick"
-        compiler_usage = Usage(cost_usd=0.0)
+        compiler_usage = Usage()
         compiler_output = None
         if compiler_called:
             compiler_calls += 1
@@ -295,7 +311,7 @@ def _sample(
         )
 
     decision_usage = _usage(decision_calls)
-    compiler_usage = _usage(compiler_calls) if compiler_calls else Usage(cost_usd=0.0)
+    compiler_usage = _usage(compiler_calls) if compiler_calls else Usage()
     total_usage = decision_usage.plus(compiler_usage)
     if system == "vector_rag":
         embedding_inputs, embedding_characters = _expected_vector_retrieval_usage(
@@ -676,3 +692,187 @@ def test_local_outputs_have_exact_diagnostic_title_and_no_success_gate(
     assert markdown.startswith(f"# {LOCAL_SMOKE_TITLE}\n")
     assert "Preregistered success gate" not in markdown
     assert "Electricity and hardware cost are unmeasured" in markdown
+
+
+def _provenance_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[
+    LocalExperimentManifest,
+    Path,
+    Path,
+    list[Path],
+    list[str],
+    Path,
+    Path,
+    Path,
+]:
+    repo = tmp_path / "repo"
+    (repo / "eval/scenarios").mkdir(parents=True)
+    (repo / "results/runs/local").mkdir(parents=True)
+    monkeypatch.setattr("anamnesis.local_report.REPO_ROOT", repo)
+
+    scenarios_path = repo / "eval/scenarios/smoke.jsonl"
+    scenarios_path.write_text('{"id":"provenance-fixture"}\n', encoding="utf-8")
+    manifest = _frozen_manifest()
+    manifest = manifest.model_copy(
+        update={
+            "dataset": manifest.dataset.model_copy(
+                update={
+                    "path": "eval/scenarios/smoke.jsonl",
+                    "sha256": _sha256_file(scenarios_path),
+                }
+            )
+        }
+    )
+    manifest_path = repo / "results/runs/local/local_smoke_manifest.json"
+    manifest_path.write_text(manifest.model_dump_json(), encoding="utf-8")
+
+    run_paths = []
+    for system in LOCAL_SYSTEM_TASKS:
+        run_path = repo / f"results/runs/local/{system}.eval"
+        run_path.write_bytes(f"validated {system} log".encode())
+        run_paths.append(run_path)
+    run_sha256 = [_sha256_file(path) for path in run_paths]
+
+    csv_path = repo / "results/local_smoke.csv"
+    csv_path.write_text("system,f1\nno_memory,0.0\n", encoding="utf-8")
+    markdown_path = repo / "results/local_smoke.md"
+    markdown_path.write_text(f"# {LOCAL_SMOKE_TITLE}\n", encoding="utf-8")
+    sidecar_path = repo / LOCAL_SMOKE_PROVENANCE_PATH
+    return (
+        manifest,
+        manifest_path,
+        scenarios_path,
+        run_paths,
+        run_sha256,
+        csv_path,
+        markdown_path,
+        sidecar_path,
+    )
+
+
+def test_result_provenance_sidecar_binds_exact_inputs_and_outputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        manifest,
+        manifest_path,
+        scenarios_path,
+        run_paths,
+        run_sha256,
+        csv_path,
+        markdown_path,
+        sidecar_path,
+    ) = _provenance_inputs(tmp_path, monkeypatch)
+    manifest_sha256 = _sha256_file(manifest_path)
+
+    _write_result_provenance(
+        sidecar_path,
+        manifest=manifest,
+        manifest_path=manifest_path,
+        manifest_sha256=manifest_sha256,
+        scenarios_path=scenarios_path,
+        run_paths=run_paths,
+        expected_run_sha256=run_sha256,
+        csv_path=csv_path,
+        markdown_path=markdown_path,
+    )
+
+    raw = sidecar_path.read_text(encoding="utf-8")
+    sidecar = json.loads(raw)
+    assert sidecar == {
+        "schema_version": 1,
+        "artifact": "anamnesis_local_smoke_result_provenance",
+        "title": LOCAL_SMOKE_TITLE,
+        "hypothesis_test_eligible": False,
+        "source_git_commit": manifest.git_commit,
+        "frozen_manifest": {
+            "path": "results/runs/local/local_smoke_manifest.json",
+            "sha256": manifest_sha256,
+        },
+        "scenario_dataset": {
+            "path": "eval/scenarios/smoke.jsonl",
+            "sha256": _sha256_file(scenarios_path),
+        },
+        "input_eval_logs": [
+            {
+                "path": f"results/runs/local/{system}.eval",
+                "sha256": digest,
+            }
+            for system, digest in zip(
+                LOCAL_SYSTEM_TASKS,
+                run_sha256,
+                strict=True,
+            )
+        ],
+        "outputs": {
+            "csv": {
+                "path": "results/local_smoke.csv",
+                "sha256": _sha256_file(csv_path),
+            },
+            "markdown": {
+                "path": "results/local_smoke.md",
+                "sha256": _sha256_file(markdown_path),
+            },
+        },
+    }
+    assert str(tmp_path) not in raw
+
+
+def test_result_provenance_is_last_and_rejects_changed_or_external_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        manifest,
+        manifest_path,
+        scenarios_path,
+        run_paths,
+        run_sha256,
+        csv_path,
+        markdown_path,
+        sidecar_path,
+    ) = _provenance_inputs(tmp_path, monkeypatch)
+    manifest_sha256 = _sha256_file(manifest_path)
+    markdown_path.unlink()
+
+    with pytest.raises(ValueError, match="Markdown output does not exist"):
+        _write_result_provenance(
+            sidecar_path,
+            manifest=manifest,
+            manifest_path=manifest_path,
+            manifest_sha256=manifest_sha256,
+            scenarios_path=scenarios_path,
+            run_paths=run_paths,
+            expected_run_sha256=run_sha256,
+            csv_path=csv_path,
+            markdown_path=markdown_path,
+        )
+    assert not sidecar_path.exists()
+
+    markdown_path.write_text(f"# {LOCAL_SMOKE_TITLE}\n", encoding="utf-8")
+    run_paths[0].write_bytes(b"changed after validation")
+    with pytest.raises(ValueError, match=r"input \.eval log 1 changed"):
+        _write_result_provenance(
+            sidecar_path,
+            manifest=manifest,
+            manifest_path=manifest_path,
+            manifest_sha256=manifest_sha256,
+            scenarios_path=scenarios_path,
+            run_paths=run_paths,
+            expected_run_sha256=run_sha256,
+            csv_path=csv_path,
+            markdown_path=markdown_path,
+        )
+    assert not sidecar_path.exists()
+
+    outside = tmp_path / "outside.eval"
+    outside.write_bytes(b"external")
+    with pytest.raises(ValueError, match="must be inside the repository"):
+        _repo_relative_path(outside, label="input .eval log")
+
+
+def test_local_provenance_default_is_the_tracked_result_sidecar() -> None:
+    assert Path("results/local_smoke.provenance.json") == LOCAL_SMOKE_PROVENANCE_PATH

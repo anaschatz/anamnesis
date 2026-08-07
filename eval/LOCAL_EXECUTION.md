@@ -222,8 +222,17 @@ anamnesis-local-report \
   --runs "$ANAMNESIS_NO_MEMORY_LOG" "$ANAMNESIS_FULL_CONTEXT_LOG" \
     "$ANAMNESIS_VECTOR_RAG_LOG" "$ANAMNESIS_TREATMENT_LOG" \
   --csv results/local_smoke.csv \
-  --markdown results/local_smoke.md
+  --markdown results/local_smoke.md \
+  --provenance results/local_smoke.provenance.json
 ```
+
+The provenance argument is optional and defaults to
+`results/local_smoke.provenance.json`. The reporter writes it last, after the
+CSV and Markdown exist. It binds the source Git commit; frozen manifest,
+scenario dataset, and four exact `.eval` logs; and both rendered result files
+to their SHA-256 digests. All of those paths must resolve inside the repository
+and are stored as repository-relative paths, so the sidecar cannot disclose a
+user directory or silently refer to an external artifact.
 
 Any 10-scenario table must be titled **Local smoke diagnostic — not a hypothesis
 test**. It may report precision, recall, F1, false alarms, obsolete-memory
