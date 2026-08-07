@@ -37,9 +37,17 @@ from anamnesis.local_runtime import (
     local_decision_contract,
     local_decision_prompt_contract,
     local_decision_schema_contract,
+    local_memory_compiler_prompt_contract,
+    local_memory_compiler_schema_contract,
+    local_memory_compiler_transport_contract,
     local_scenario_solver,
     local_system_config_sha256,
     run_local_model_preflight,
+)
+from anamnesis.local_wire import (
+    LOCAL_MEMORY_COMPILER_INSTRUCTIONS,
+    LOCAL_MEMORY_COMPILER_VERSION,
+    build_local_memory_compiler_prompt,
 )
 from anamnesis.memory import CancelIntent, MemoryDelta
 from anamnesis.oracle import (
@@ -291,6 +299,86 @@ def test_actual_local_compiler_schema_contains_closed_trigger_variants() -> None
         for variant in trigger.anyOf or []
     ] == [["at"], ["recurring"], ["condition_transition"]]
     assert all(variant.additionalProperties is False for variant in trigger.anyOf or [])
+
+
+def test_local_compiler_w1_rules_are_frozen_and_data_blind() -> None:
+    required_rules = (
+        "Treat the current event as the only source of new information.",
+        "Never emit facts, triggers, conditions, or action templates solely "
+        "because they appear in active state.",
+        "An explicit same-value reaffirmation is a valid new fact assertion even "
+        "when active state already contains that value.",
+        "A factual schedule, observation, possibility, brainstorming statement, "
+        "or explicit instruction not to remind never creates an intent.",
+        "Never replace a requested future trigger with the current event timestamp.",
+        "For at or recurring, if the exact instant or range is not unambiguously "
+        "resolvable, omit the mutation rather than using the event time.",
+        "When no window is stated, set active_from to the current event timestamp "
+        "and active_until to exactly seven calendar days later at the same local "
+        "time and UTC offset.",
+        "Preserve every explicit AND conjunct in required_conditions; blockers "
+        "suppress when any blocker is true.",
+        "Encode an explicit completed or already-done state as a blocker, not as "
+        "a required synthetic negative fact.",
+        "Never use spaces or uppercase characters.",
+        "For a recurring per-occurrence date use {date}, never a weekday word.",
+        "Omit an uncertain mutation instead of guessing.",
+    )
+    for rule in required_rules:
+        assert LOCAL_MEMORY_COMPILER_INSTRUCTIONS.count(rule) == 1
+
+    event = ObservableEvent(
+        id="<event-id>",
+        at="2000-01-01T00:00:00+00:00",
+        kind="user_message",
+        text="<event-text>",
+    )
+    active_state = '{"facts":[],"intents":[]}'
+    prompt = build_local_memory_compiler_prompt(
+        event=event,
+        active_state=active_state,
+    )
+
+    assert prompt.startswith(f"{LOCAL_MEMORY_COMPILER_INSTRUCTIONS}\nCurrent event: ")
+    assert "Current event: [<event-id>] 2000-01-01T00:00:00+00:00" in prompt
+    assert f"Active compact state (canonical JSON):\n{active_state}\n" in prompt
+    assert "for example" not in prompt.casefold()
+    assert "e.g." not in prompt.casefold()
+    for hidden_field in (
+        "supersedes",
+        "expected_actions",
+        "acceptable_evidence_sets",
+        "forbidden_actions",
+        "future_events",
+        "gold_labels",
+    ):
+        assert hidden_field not in prompt
+
+
+def test_local_compiler_w1_version_and_hash_drift_preserve_schema() -> None:
+    prompt_sha256 = hashlib.sha256(
+        local_memory_compiler_prompt_contract().encode()
+    ).hexdigest()
+    schema_sha256 = hashlib.sha256(
+        local_memory_compiler_schema_contract().encode()
+    ).hexdigest()
+    transport_sha256 = hashlib.sha256(
+        local_memory_compiler_transport_contract().encode()
+    ).hexdigest()
+
+    assert LOCAL_MEMORY_COMPILER_VERSION == "local.v0.2"
+    assert prompt_sha256 == (
+        "4a1f6ece3a1a72e98b54f91433039b6d41ff78e766969852a5498916909d1f60"
+    )
+    assert prompt_sha256 != (
+        "b5d910ee7a96e358ef6b1cb45f99627610aeddf9f4a212161bb8fc1f2b452821"
+    )
+    assert schema_sha256 == (
+        "8871ff344eb3a2e88a53b964ef2f24f089a72507c69073ec323cf26a428c3030"
+    )
+    assert transport_sha256 == (
+        "d90471077b929d65737e0d098dbd0c2a12c67f6c75ff31209fca6a63782a7067"
+    )
 
 
 def test_local_runtime_accepts_only_exact_loopback_and_environment() -> None:

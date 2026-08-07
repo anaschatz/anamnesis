@@ -194,4 +194,4 @@ def test_local_compiler_contract_is_deterministic_and_schema_bound() -> None:
         == hashlib.sha256(second.encode()).hexdigest()
     )
     assert '"discriminator"' in first
-    assert "local.v0.1" in first
+    assert first.startswith("local.v0.2\n")
