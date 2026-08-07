@@ -6,9 +6,14 @@ import pytest
 from pydantic import ValidationError
 
 from anamnesis.local_wire import (
+    LOCAL_MEMORY_COMPILER_INSTRUCTIONS,
+    LOCAL_MEMORY_COMPILER_W2_INSTRUCTIONS,
+    LOCAL_MEMORY_COMPILER_W2_PAYLOAD_INVARIANT,
     LocalMemoryDeltaWire,
     build_local_memory_compiler_prompt,
+    build_local_memory_compiler_w2_prompt,
     local_memory_compiler_contract,
+    local_memory_compiler_w2_contract,
 )
 from anamnesis.memory import (
     AtTrigger,
@@ -195,3 +200,78 @@ def test_local_compiler_contract_is_deterministic_and_schema_bound() -> None:
     )
     assert '"discriminator"' in first
     assert first.startswith("local.v0.2\n")
+
+
+def test_local_w1_contract_hash_remains_frozen() -> None:
+    assert (
+        hashlib.sha256(local_memory_compiler_contract().encode()).hexdigest()
+        == "1ac94e36a5db89ef03798b091424494b9cf50f52ac8e7aaa70e8cfcfc3b0ebd8"
+    )
+
+
+def test_local_w2_contract_hash_is_frozen() -> None:
+    contract = local_memory_compiler_w2_contract()
+
+    assert contract.startswith("local.v0.3\n")
+    assert (
+        hashlib.sha256(contract.encode()).hexdigest()
+        == "cb46570bfb1a101bff51008315ba121e07cea38a93de38fe6c79693d746f72c9"
+    )
+
+
+def test_local_w2_sparse_optional_payload_rule_is_complete() -> None:
+    rule = LOCAL_MEMORY_COMPILER_W2_PAYLOAD_INVARIANT
+
+    assert "explicitly sourced by the current event" in rule
+    assert "legitimately preserved within an action_template" in rule
+    assert "current event actually updates" in rule
+    assert "Omit an unused payload key (preferred), or use JSON null" in rule
+    for forbidden_filler in (
+        "empty string",
+        "false",
+        "empty collection",
+        "placeholder",
+        "zero filler",
+    ):
+        assert forbidden_filler in rule
+    assert "explicitly sourced quantity of zero remains valid" in rule
+    assert "Before returning, remove filler values" in rule
+    assert '{"subject":"check permit"}' in rule
+    assert "Add optional keys only when sourced" in rule
+
+
+def test_local_w2_uses_the_unchanged_w1_wire_schema() -> None:
+    w1_schema = local_memory_compiler_contract().rsplit("\n", 1)[-1]
+    w2_schema = local_memory_compiler_w2_contract().rsplit("\n", 1)[-1]
+
+    assert w2_schema == w1_schema
+
+
+def test_local_w2_prompt_delta_is_only_the_sparse_payload_invariant() -> None:
+    event = ObservableEvent(
+        id="event-1",
+        at="2026-03-02T09:00:00+02:00",
+        kind="user_message",
+        text="Current event only.",
+    )
+    active_state = '{"facts":[],"intents":[]}'
+    w1_prompt = build_local_memory_compiler_prompt(
+        event=event,
+        active_state=active_state,
+    )
+    w2_prompt = build_local_memory_compiler_w2_prompt(
+        event=event,
+        active_state=active_state,
+    )
+
+    assert LOCAL_MEMORY_COMPILER_W2_INSTRUCTIONS == (
+        LOCAL_MEMORY_COMPILER_INSTRUCTIONS + LOCAL_MEMORY_COMPILER_W2_PAYLOAD_INVARIANT
+    )
+    assert w2_prompt == w1_prompt.replace(
+        LOCAL_MEMORY_COMPILER_INSTRUCTIONS,
+        LOCAL_MEMORY_COMPILER_W2_INSTRUCTIONS,
+        1,
+    )
+    assert w2_prompt.count(LOCAL_MEMORY_COMPILER_W2_PAYLOAD_INVARIANT) == 1
+    for leak_marker in ("writer_diagnostic", "oracle", "gold", "scenario"):
+        assert leak_marker not in LOCAL_MEMORY_COMPILER_W2_PAYLOAD_INVARIANT.casefold()

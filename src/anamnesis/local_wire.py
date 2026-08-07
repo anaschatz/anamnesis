@@ -34,6 +34,7 @@ from anamnesis.memory import (
 from anamnesis.schema import ActionValue, ObservableEvent, StrictModel
 
 LOCAL_MEMORY_COMPILER_VERSION = "local.v0.2"
+LOCAL_MEMORY_COMPILER_W2_VERSION = "local.v0.3"
 
 
 class LocalPayloadWire(StrictModel):
@@ -311,6 +312,24 @@ LOCAL_MEMORY_COMPILER_INSTRUCTIONS = (
     "- Return only schema-matching JSON and no prose.\n"
 )
 
+LOCAL_MEMORY_COMPILER_W2_PAYLOAD_INVARIANT = (
+    "\nWriter ablation W2 sparse optional-payload serialization invariant:\n"
+    "- An optional payload slot may contain a value only when that value is "
+    "explicitly sourced by the current event, or when the value is legitimately "
+    "preserved within an action_template that the current event actually "
+    "updates. Otherwise the slot is unused.\n"
+    "- Omit an unused payload key (preferred), or use JSON null. Never fill an "
+    "unused key with an empty string, false, an empty collection, a placeholder, "
+    "or zero filler. An explicitly sourced quantity of zero remains valid. "
+    "Before returning, remove filler values.\n"
+    '- Minimal payload example: {"subject":"check permit"}. Add optional keys '
+    "only when sourced.\n"
+)
+
+LOCAL_MEMORY_COMPILER_W2_INSTRUCTIONS = (
+    LOCAL_MEMORY_COMPILER_INSTRUCTIONS + LOCAL_MEMORY_COMPILER_W2_PAYLOAD_INVARIANT
+)
+
 
 def build_local_memory_compiler_prompt(
     *,
@@ -321,6 +340,22 @@ def build_local_memory_compiler_prompt(
 
     return (
         f"{LOCAL_MEMORY_COMPILER_INSTRUCTIONS}\n"
+        f"Current event: [{event.id}] {event.at.isoformat()} | "
+        f"{event.kind} | {event.text}\n\n"
+        "Active compact state (canonical JSON):\n"
+        f"{active_state}\n"
+    )
+
+
+def build_local_memory_compiler_w2_prompt(
+    *,
+    event: ObservableEvent,
+    active_state: str,
+) -> str:
+    """Render the W2 local compiler prompt with sparse payload serialization."""
+
+    return (
+        f"{LOCAL_MEMORY_COMPILER_W2_INSTRUCTIONS}\n"
         f"Current event: [{event.id}] {event.at.isoformat()} | "
         f"{event.kind} | {event.text}\n\n"
         "Active compact state (canonical JSON):\n"
@@ -349,13 +384,39 @@ def local_memory_compiler_contract() -> str:
     return f"{LOCAL_MEMORY_COMPILER_VERSION}\n{rendered}\n{schema}"
 
 
+def local_memory_compiler_w2_contract() -> str:
+    """Return the W2 local compiler prompt and unchanged wire schema."""
+
+    sentinel = ObservableEvent(
+        id="<event-id>",
+        at=datetime.fromisoformat("2000-01-01T00:00:00+00:00"),
+        kind="user_message",
+        text="<event-text>",
+    )
+    rendered = build_local_memory_compiler_w2_prompt(
+        event=sentinel,
+        active_state='{"facts":[],"intents":[]}',
+    )
+    schema = json.dumps(
+        LocalMemoryDeltaWire.model_json_schema(),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return f"{LOCAL_MEMORY_COMPILER_W2_VERSION}\n{rendered}\n{schema}"
+
+
 __all__ = [
     "LOCAL_MEMORY_COMPILER_VERSION",
+    "LOCAL_MEMORY_COMPILER_W2_INSTRUCTIONS",
+    "LOCAL_MEMORY_COMPILER_W2_PAYLOAD_INVARIANT",
+    "LOCAL_MEMORY_COMPILER_W2_VERSION",
     "LocalAtTriggerWire",
     "LocalConditionTransitionTriggerWire",
     "LocalMemoryDeltaWire",
     "LocalRecurringTriggerWire",
     "LocalTriggerWire",
     "build_local_memory_compiler_prompt",
+    "build_local_memory_compiler_w2_prompt",
     "local_memory_compiler_contract",
+    "local_memory_compiler_w2_contract",
 ]
