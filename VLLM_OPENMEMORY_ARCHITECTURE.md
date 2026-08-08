@@ -131,6 +131,16 @@ audit state. There is deliberately no "allow all" default.
   and
 - the module neither imports nor receives `InMemoryAnamnesis`.
 
+`src/anamnesis/openmemory_strategy.py` is the additive runner integration. It
+wraps the ordinary authoritative `AnamnesisMemoryStrategy`, opens a fresh
+caller-supplied recall snapshot on every reset, performs search only, and puts
+the returned text in a separately labelled untrusted JSON prompt section. It
+rejects any index that does not explicitly declare itself non-authoritative,
+evidence-free, and unable to mutate Anamnesis. Its `commit` method delegates
+only to the deterministic store; OpenMemory receives no decision or execution
+write. Because the provider exposes no neutral usage accounting, this arm is
+diagnostic-only and marks usage and cost completeness false.
+
 This is an integration seam, not a claim that the current upstream rewrite is
 stable enough for a frozen benchmark. The revision/path/provider carried by the
 shim are caller attestations, not proof of installed bytes or live database

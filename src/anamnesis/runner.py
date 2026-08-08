@@ -95,15 +95,18 @@ async def run_scenario(
         )
         ingest_work = await strategy.ingest(event)
         selection = strategy.select(event)
+        prompt_kwargs: dict[str, object] = {
+            "now": event.at.isoformat(),
+            "current_event_id": event.id,
+            "context_events": selection.events,
+            "decision_history": selection.decisions,
+            "memory_view": selection.memory_view,
+        }
+        if selection.retrospective_recall is not None:
+            prompt_kwargs["retrospective_recall"] = selection.retrospective_recall
         request = DecisionRequest(
             event=event,
-            prompt=decision_prompt_builder(
-                now=event.at.isoformat(),
-                current_event_id=event.id,
-                context_events=selection.events,
-                decision_history=selection.decisions,
-                memory_view=selection.memory_view,
-            ),
+            prompt=decision_prompt_builder(**prompt_kwargs),
         )
         call = await model.decide(request)
         raw_completion = call.raw_completion
@@ -183,6 +186,9 @@ async def run_scenario(
         }
         if strategy.name == "anamnesis":
             fallback_config["deterministic_memory"] = anamnesis_runtime_contract()
+        strategy_contract = getattr(strategy, "strategy_contract", None)
+        if callable(strategy_contract):
+            fallback_config["strategy_contract"] = strategy_contract()
         serialized_config = json.dumps(
             fallback_config,
             sort_keys=True,

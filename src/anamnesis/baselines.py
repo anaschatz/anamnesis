@@ -102,6 +102,7 @@ class ContextSelection:
     events: list[ObservableEvent]
     decisions: list[DecisionHistoryRecord] = field(default_factory=list)
     memory_view: MemoryView | None = None
+    retrospective_recall: tuple[str, ...] | None = None
     state_sha256: str | None = None
     due_candidate_ids: list[str] = field(default_factory=list)
     usage: RetrievalUsage = field(default_factory=RetrievalUsage)

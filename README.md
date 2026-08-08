@@ -160,6 +160,13 @@ vLLM adapter adds pinned JSON-schema constrained generation with independent
 JSON, wire, domain, reducer, finish-reason, and usage gates. A separate optional
 OpenMemory adapter provides namespaced retrospective recall only—its IDs and
 scores can never become Anamnesis truth, triggers, executions, or evidence.
+The additive `anamnesis_openmemory_recall` diagnostic strategy now connects
+that boundary to the runner as a search-only sidecar: every scenario receives
+a fresh caller-supplied snapshot, recalled text is serialized into a separately
+labelled untrusted prompt section, and only the deterministic Anamnesis store
+may commit state or evidence. OpenMemory usage remains deliberately incomplete
+because the upstream interface has no provider-neutral token/cost accounting.
+No live OpenMemory measured run has been made.
 These changes define a new future experiment identity; they are not a rerun or
 reinterpretation of W1-W3. A live vLLM cell has not run because the current
 Apple M3 host and frozen Q4_K_M artifacts are not compatible with a faithful
