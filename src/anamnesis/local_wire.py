@@ -35,6 +35,7 @@ from anamnesis.schema import ActionValue, ObservableEvent, StrictModel
 
 LOCAL_MEMORY_COMPILER_VERSION = "local.v0.2"
 LOCAL_MEMORY_COMPILER_W2_VERSION = "local.v0.3"
+LOCAL_MEMORY_COMPILER_W3_VERSION = "local.v0.4"
 
 
 class LocalPayloadWire(StrictModel):
@@ -330,6 +331,73 @@ LOCAL_MEMORY_COMPILER_W2_INSTRUCTIONS = (
     LOCAL_MEMORY_COMPILER_INSTRUCTIONS + LOCAL_MEMORY_COMPILER_W2_PAYLOAD_INVARIANT
 )
 
+LOCAL_MEMORY_COMPILER_W3_ADDENDUM = (
+    "\nWriter intervention W3 semantic validation procedure:\n"
+    "- Apply these checks silently and in order: license the mutation from the "
+    "current event; resolve its target; choose the trigger type; resolve calendar "
+    "values; preserve conditions; assemble the complete sourced payload; "
+    "validate; then serialize. Return JSON only, without reasoning.\n"
+    "- Normalize identifiers before serialization. For an ordinary source "
+    "phrase, lowercase ASCII, replace each maximal run outside [a-z0-9] with one "
+    "underscore, and trim leading or trailing underscores. Preserve a dot only "
+    "when an explicit hierarchy already exists. Every fact entity and attribute "
+    "segment must match [a-z0-9][a-z0-9_-]*; every intent_id segment must match "
+    "[a-z][a-z0-9_-]*. Use exactly the same normalized entity and attribute in a "
+    "condition and its corresponding fact. A unit is either an explicitly "
+    "sourced non-empty string or null/omitted; never use an empty string. If a "
+    "unique normalized identity cannot be formed, omit that mutation.\n"
+    "- A newly created intent_id names the enduring requested action, not a "
+    "mutable date, weekday, time, threshold, state, or value. For update or "
+    "cancellation, match exactly one active intent by the requested action and "
+    "copy its intent_id character-for-character from Active compact state. Never "
+    "construct, rename, or infer an update or cancellation ID from revised "
+    "details. If zero or multiple active intents match, omit that mutation.\n"
+    "- Select the trigger before filling its fields. Use recurring for an "
+    "every/each repeated schedule. Use condition_transition for a request that "
+    "fires when explicit facts or thresholds become true and has no independent "
+    "firing instant; a limiting deadline belongs in its active window. Use at for "
+    "one explicit future instant or deadline. A condition attached to an explicit "
+    "at or recurring schedule remains in required_conditions. Never substitute "
+    "the current event timestamp for a missing trigger.\n"
+    "- Resolve dates and times on the current event's local calendar. today is "
+    "the current local date and tomorrow is one calendar day later. For a bare "
+    "weekday, choose the first occurrence whose requested local datetime is "
+    "strictly later than the event: compute (target weekday index - current "
+    "weekday index) modulo seven, adding seven days when the result is zero and "
+    "the requested time is not later. this weekday means that weekday in the "
+    "current ISO week; next weekday means that weekday in the following ISO week. "
+    "Verify that the resulting date has the named weekday and preserve the "
+    "required UTC offset. If wording, date, time, offset, recurrence range, or "
+    "required IANA timezone is not uniquely supplied by the current event, or "
+    "preserved unchanged from the matched active intent during an update, omit "
+    "the mutation.\n"
+    "- For a create or an action_template update, first form the minimal subject "
+    "and then inspect every closed optional slot: address, build, date, flight, "
+    "greenhouse, item, project, quantity, recipient, room, shipment, tank, and "
+    "trip. Include every current-event value that is an argument of the requested "
+    "action and fits exactly one slot, exactly once. Preserve source casing and "
+    "numeric type, including an explicitly sourced zero. Do not omit a sourced "
+    "value merely to stay sparse, and do not copy a trigger-only date or time into "
+    "the payload. Omit or null every unsourced slot and never use filler. A "
+    "recurring per-occurrence action date uses {date}.\n"
+    "- On an action_template update, begin with the matched active template, apply "
+    "only changes licensed by the current event, retain every unchanged sourced "
+    "leaf, and return the full current action_template. On a trigger, conditions, "
+    "or blockers update, likewise return the full changed compound field. Omit "
+    "every unchanged top-level update field.\n"
+    "- Before returning a mutation, confirm that its target is unique, its "
+    "identifiers and units satisfy both transport and domain constraints, its "
+    "trigger has the correct type and complete fields, its temporal value is "
+    "uniquely resolved, every explicit AND conjunct is preserved, and every "
+    "sourced payload value is present without filler. If any required check is "
+    "uncertain, omit that mutation; keep any independent mutation that remains "
+    "fully supported.\n"
+)
+
+LOCAL_MEMORY_COMPILER_W3_INSTRUCTIONS = (
+    LOCAL_MEMORY_COMPILER_W2_INSTRUCTIONS + LOCAL_MEMORY_COMPILER_W3_ADDENDUM
+)
+
 
 def build_local_memory_compiler_prompt(
     *,
@@ -356,6 +424,22 @@ def build_local_memory_compiler_w2_prompt(
 
     return (
         f"{LOCAL_MEMORY_COMPILER_W2_INSTRUCTIONS}\n"
+        f"Current event: [{event.id}] {event.at.isoformat()} | "
+        f"{event.kind} | {event.text}\n\n"
+        "Active compact state (canonical JSON):\n"
+        f"{active_state}\n"
+    )
+
+
+def build_local_memory_compiler_w3_prompt(
+    *,
+    event: ObservableEvent,
+    active_state: str,
+) -> str:
+    """Render the W3 local compiler prompt with bundled semantic validation."""
+
+    return (
+        f"{LOCAL_MEMORY_COMPILER_W3_INSTRUCTIONS}\n"
         f"Current event: [{event.id}] {event.at.isoformat()} | "
         f"{event.kind} | {event.text}\n\n"
         "Active compact state (canonical JSON):\n"
@@ -405,11 +489,35 @@ def local_memory_compiler_w2_contract() -> str:
     return f"{LOCAL_MEMORY_COMPILER_W2_VERSION}\n{rendered}\n{schema}"
 
 
+def local_memory_compiler_w3_contract() -> str:
+    """Return the W3 local compiler prompt and unchanged wire schema."""
+
+    sentinel = ObservableEvent(
+        id="<event-id>",
+        at=datetime.fromisoformat("2000-01-01T00:00:00+00:00"),
+        kind="user_message",
+        text="<event-text>",
+    )
+    rendered = build_local_memory_compiler_w3_prompt(
+        event=sentinel,
+        active_state='{"facts":[],"intents":[]}',
+    )
+    schema = json.dumps(
+        LocalMemoryDeltaWire.model_json_schema(),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return f"{LOCAL_MEMORY_COMPILER_W3_VERSION}\n{rendered}\n{schema}"
+
+
 __all__ = [
     "LOCAL_MEMORY_COMPILER_VERSION",
     "LOCAL_MEMORY_COMPILER_W2_INSTRUCTIONS",
     "LOCAL_MEMORY_COMPILER_W2_PAYLOAD_INVARIANT",
     "LOCAL_MEMORY_COMPILER_W2_VERSION",
+    "LOCAL_MEMORY_COMPILER_W3_ADDENDUM",
+    "LOCAL_MEMORY_COMPILER_W3_INSTRUCTIONS",
+    "LOCAL_MEMORY_COMPILER_W3_VERSION",
     "LocalAtTriggerWire",
     "LocalConditionTransitionTriggerWire",
     "LocalMemoryDeltaWire",
@@ -417,6 +525,8 @@ __all__ = [
     "LocalTriggerWire",
     "build_local_memory_compiler_prompt",
     "build_local_memory_compiler_w2_prompt",
+    "build_local_memory_compiler_w3_prompt",
     "local_memory_compiler_contract",
     "local_memory_compiler_w2_contract",
+    "local_memory_compiler_w3_contract",
 ]
