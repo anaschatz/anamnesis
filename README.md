@@ -137,6 +137,19 @@ was created or evaluated. See the
 [W3-M2 failure record](results/local_writer_w3_m2_preflight_failure.md) and
 [provenance sidecar](results/local_writer_w3_m2_preflight_failure.provenance.json).
 
+W3-M2-T1 then isolated the transport failure without changing the model,
+prompt, schema, fixture, or token budget. Forwarding
+`reasoning_effort: "none"` in every raw Ollama request eliminated the hidden
+reasoning exhaustion: all eight compiler calls produced final, non-truncated
+content, and total setup time fell from about 41.15 to 8.14 minutes. However,
+all eight outputs still failed the frozen compiler wire schema by inventing
+alternate mutation fields or copying internal stored-revision structures. D1
+no-action passed. The single run used 17,653 input and 2,616 output tokens at
+exactly `$0.00` provider API cost. T1 is rejected at preflight with no retry or
+scenario call. See the
+[W3-M2-T1 failure record](results/local_writer_w3_m2_t1_preflight_failure.md)
+and [provenance sidecar](results/local_writer_w3_m2_t1_preflight_failure.provenance.json).
+
 Both local latency sets are diagnostic only. In D0, the Ollama server was
 restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap
 pressure. In D1, all four tasks stayed in one process, whose prompt cache grew

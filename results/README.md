@@ -65,6 +65,18 @@ completion; only D1 no-action passed. The accompanying
 binds the clean source commit and exact nine-call `.eval`. W3-M2 is rejected,
 and no scenario dataset, manifest, or measured scenario log exists for it.
 
+The transport-only
+[W3-M2-T1 preflight](local_writer_w3_m2_t1_preflight_failure.md) then kept the
+model, W3 prompt/schema/fixture, context budget, and execution settings fixed
+while forwarding `reasoning_effort: "none"` to Ollama. This eliminated the
+hidden-reasoning output exhaustion: all compiler calls returned final,
+non-truncated content and total setup time fell to about 8.14 minutes. The gate
+still failed because all eight compiler outputs used structures outside the
+frozen `LocalMemoryDeltaWire`; D1 no-action passed. Its
+[provenance sidecar](local_writer_w3_m2_t1_preflight_failure.provenance.json)
+binds the exact clean source and raw nine-call log. T1 is rejected with zero
+scenario calls and no authorized rerun.
+
 For this W2 publication, the exact frozen manifest, standalone preflight
 `.eval`, and measured `.eval` are deliberately tracked under
 `results/runs/local/writer_diagnostic_w2/` despite the directory's normal
@@ -79,6 +91,11 @@ manifest or scenario log because the semantic gate failed.
 The exact W3-M2 preflight `.eval` is tracked under
 `results/runs/local/writer_w3_m2/`. It contains local absolute paths but no
 credentials or API secrets. There is deliberately no W3-M2 scenario artifact.
+
+The exact W3-M2-T1 preflight `.eval` is tracked under
+`results/runs/local/writer_w3_m2_t1/`. It likewise contains local absolute
+paths but no credentials or API secrets. There is deliberately no T1 scenario
+artifact.
 
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
