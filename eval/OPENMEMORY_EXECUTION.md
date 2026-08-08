@@ -6,7 +6,7 @@ decisions, paired gate, or the already committed OpenMemory recall prompt.
 
 ## Frozen local matrix
 
-- model: `ollama/qwen3:4b-instruct` with the existing exact local artifact pin;
+- model: `ollama/qwen3.5:9b-q4_K_M` with the existing exact local artifact pin;
 - decision schema and local decision instructions: unchanged;
 - seed `101`, temperature `0`, cache disabled, retries `0`, repair calls `0`;
 - case order: exact artifact order;
@@ -31,3 +31,10 @@ same v1 cases.
 Before a live run, the task must prove the exact local response schema, model,
 loopback endpoint, seed/config, complete model usage and clean source commit.
 If any preflight or raw-log integrity check fails, no metric is interpreted.
+
+The original draft named the older 4B artifact. Before any diagnostic call, a
+read-only local inventory showed that artifact was no longer installed while
+the independently byte-pinned 9B artifact was already present. The model choice
+was therefore changed and committed before execution, with no download and no
+case/result inspection. This remains a paired within-model recall comparison;
+it is not comparable to earlier 4B result levels.
