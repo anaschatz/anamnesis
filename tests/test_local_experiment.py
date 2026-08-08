@@ -13,6 +13,11 @@ from anamnesis.local_experiment import (
     LOCAL_MODEL_ID,
     LOCAL_WRITER_REFERENCE_PATH,
     LOCAL_WRITER_REFERENCE_SHA256,
+    LOCAL_WRITER_W2_DATASET_SHA256,
+    LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH,
+    LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256,
+    LOCAL_WRITER_W2_REFERENCE_PATH,
+    LOCAL_WRITER_W2_REFERENCE_SHA256,
     LocalExperimentManifest,
     OllamaArtifactPin,
     require_local_only_environment,
@@ -23,6 +28,7 @@ from anamnesis.oracle import ORACLE_SYSTEM_NAME
 
 TEMPLATE = Path("eval/local_experiment_manifest.template.json")
 WRITER_TEMPLATE = Path("eval/local_writer_experiment_manifest.template.json")
+WRITER_W2_TEMPLATE = Path("eval/local_writer_w2_experiment_manifest.template.json")
 MODEL_PIN = Path("eval/ollama_qwen3_4b_instruct.pin.json")
 HASH = "a" * 64
 COMMIT = "b" * 40
@@ -55,6 +61,10 @@ def _writer_raw(
     assert isinstance(reference, dict)
     reference["sha256"] = reference_sha256
     return raw
+
+
+def _writer_w2_raw() -> dict[str, object]:
+    return json.loads(WRITER_W2_TEMPLATE.read_text(encoding="utf-8"))
 
 
 def test_local_smoke_template_is_valid_and_static_inputs_match() -> None:
@@ -135,6 +145,54 @@ def test_local_writer_template_is_a_distinct_single_system_phase() -> None:
     assert manifest.writer_reference.sha256 == LOCAL_WRITER_REFERENCE_SHA256
 
     verify_static_local_inputs(manifest, repo_root=Path.cwd())
+
+
+def test_local_writer_w2_template_pins_v3_fixture_and_reporter_reference() -> None:
+    manifest = LocalExperimentManifest.model_validate(_writer_w2_raw())
+
+    assert manifest.phase == "writer_diagnostic_w2"
+    assert manifest.systems == ["anamnesis"]
+    assert manifest.dataset.sha256 == LOCAL_WRITER_W2_DATASET_SHA256
+    assert manifest.writer_reference is not None
+    assert manifest.writer_reference.path == LOCAL_WRITER_W2_REFERENCE_PATH
+    assert manifest.writer_reference.sha256 == LOCAL_WRITER_W2_REFERENCE_SHA256
+    assert manifest.preflight_fixture is not None
+    assert manifest.preflight_fixture.path == LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH
+    assert manifest.preflight_fixture.sha256 == LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256
+    assert manifest.execution.warmup_policy == "frozen_w2_semantic_gate_c1_c2_c3_d1"
+
+    verify_static_local_inputs(manifest, repo_root=Path.cwd())
+
+
+def test_local_writer_w2_warmup_policy_is_phase_exclusive() -> None:
+    w2 = _writer_w2_raw()
+    execution = w2["execution"]
+    assert isinstance(execution, dict)
+    execution["warmup_policy"] = "one_unmeasured_call_per_schema"
+    with pytest.raises(ValidationError, match="requires warmup_policy"):
+        LocalExperimentManifest.model_validate(w2)
+
+    w1 = _writer_raw()
+    execution = w1["execution"]
+    assert isinstance(execution, dict)
+    execution["warmup_policy"] = "frozen_w2_semantic_gate_c1_c2_c3_d1"
+    with pytest.raises(ValidationError, match="requires warmup_policy"):
+        LocalExperimentManifest.model_validate(w1)
+
+
+def test_local_writer_w2_fixture_is_required_and_phase_exclusive() -> None:
+    missing = _writer_w2_raw()
+    missing.pop("preflight_fixture")
+    with pytest.raises(ValidationError, match="requires preflight_fixture"):
+        LocalExperimentManifest.model_validate(missing)
+
+    w1 = _writer_raw()
+    w1["preflight_fixture"] = {
+        "path": LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH,
+        "sha256": LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256,
+    }
+    with pytest.raises(ValidationError, match="only valid"):
+        LocalExperimentManifest.model_validate(w1)
 
 
 def test_local_oracle_annotations_are_required_only_for_oracle_smoke() -> None:

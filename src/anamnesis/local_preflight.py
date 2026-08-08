@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from inspect_ai.event import ModelEvent
 from inspect_ai.log import EvalLog, read_eval_log
@@ -13,19 +15,28 @@ from inspect_ai.model._openai import openai_completion_params
 from pydantic import ValidationError
 
 from anamnesis.experiment import ArtifactPin
+from anamnesis.local_experiment import LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256
 from anamnesis.local_runtime import (
     LOCAL_MODEL_PREFLIGHT_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_TASK_VERSION,
+    LOCAL_MODEL_PREFLIGHT_W2_PURPOSE,
+    LOCAL_MODEL_PREFLIGHT_W2_SAMPLE_ID,
+    LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION,
     LOCAL_OLLAMA_BASE_URL,
     LOCAL_OLLAMA_MODEL,
     LOCAL_OLLAMA_SERVICE_MODEL,
     LocalDecisionWire,
     LocalModelPreflightResult,
+    LocalModelPreflightW2Result,
     _compiler_preflight_semantics,
     _local_decision_schema,
     _local_memory_delta_schema,
     _local_usage_from_output,
+    _w2_compiler_semantic_valid,
+    _w2_decision_semantic_valid,
     build_local_decision_prompt,
+    load_local_w2_preflight_fixture,
+    local_w2_preflight_prompts,
 )
 from anamnesis.local_wire import (
     LocalMemoryDeltaWire,
@@ -288,6 +299,184 @@ def validate_local_preflight_log(
         raise ValueError("local decision preflight emitted a false reminder")
 
 
+def validate_local_w2_preflight_model_events(
+    events: list[ModelEvent],
+    *,
+    fixture: Mapping[str, Any],
+    result: LocalModelPreflightW2Result,
+    seed: int = 101,
+) -> Usage:
+    """Validate exactly C1,C2,C3,D1 and return their aggregate setup usage."""
+
+    if len(events) != 4:
+        raise ValueError("local W2 preflight must contain exactly four model calls")
+    if (
+        not result.passed
+        or result.loaded_model is None
+        or not result.same_model_for_compiler_and_decision
+        or result.fixture_sha256 != LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256
+    ):
+        raise ValueError("local W2 semantic preflight result did not pass")
+    if any(
+        case.parse_error
+        or not case.semantic_valid
+        or not case.usage_complete
+        or not case.cost_complete
+        or case.usage.cost_usd != 0.0
+        for case in result.cases
+    ):
+        raise ValueError("local W2 preflight result flags are inconsistent")
+
+    prompts = local_w2_preflight_prompts(fixture)
+    compiler_cases = fixture.get("compiler_cases")
+    if not isinstance(compiler_cases, list) or len(compiler_cases) != 3:
+        raise ValueError("local W2 compiler fixture cases are invalid")
+    aggregate = Usage(cost_usd=0.0)
+    for index, case in enumerate(compiler_cases):
+        if not isinstance(case, dict):
+            raise ValueError("local W2 compiler fixture case is invalid")
+        event = events[index]
+        _validate_local_model_event(
+            event,
+            prompt=prompts[index],
+            schema=_local_memory_delta_schema(LOCAL_OLLAMA_MODEL),
+            seed=seed,
+        )
+        usage = _local_usage_from_output(event.output)
+        if usage.input_tokens <= 0 or usage.output_tokens <= 0:
+            raise ValueError("W2 compiler event has incomplete token usage")
+        if result.cases[index].usage != usage:
+            raise ValueError("W2 compiler usage differs from the raw model event")
+        parse_error, semantic_valid = _w2_compiler_semantic_valid(
+            event.output.completion,
+            case,
+        )
+        if (
+            result.cases[index].parse_error != parse_error
+            or result.cases[index].semantic_valid != semantic_valid
+        ):
+            raise ValueError("W2 compiler semantics differ from the raw model event")
+        aggregate = aggregate.plus(usage)
+
+    decision_event = events[3]
+    _validate_local_model_event(
+        decision_event,
+        prompt=prompts[3],
+        schema=_local_decision_schema(LOCAL_OLLAMA_MODEL),
+        seed=seed,
+    )
+    decision_usage = _local_usage_from_output(decision_event.output)
+    if decision_usage.input_tokens <= 0 or decision_usage.output_tokens <= 0:
+        raise ValueError("W2 decision event has incomplete token usage")
+    if result.cases[3].usage != decision_usage:
+        raise ValueError("W2 decision usage differs from the raw model event")
+    parse_error, semantic_valid = _w2_decision_semantic_valid(
+        decision_event.output.completion
+    )
+    if (
+        result.cases[3].parse_error != parse_error
+        or result.cases[3].semantic_valid != semantic_valid
+    ):
+        raise ValueError("W2 decision semantics differ from the raw model event")
+    aggregate = aggregate.plus(decision_usage)
+    if aggregate != result.usage:
+        raise ValueError("W2 aggregate usage differs from the result")
+    return aggregate
+
+
+def validate_local_w2_preflight_log(
+    log: EvalLog,
+    *,
+    fixture: Mapping[str, Any],
+    expected_git_commit: str,
+    expected_pricing_sha256: str,
+    seed: int = 101,
+) -> LocalModelPreflightW2Result:
+    """Validate the exact four-call frozen W2 standalone preflight log."""
+
+    if log.status != "success" or log.invalidated:
+        raise ValueError("local W2 preflight log is not a successful evaluation")
+    spec = log.eval
+    expected_metadata = {
+        "purpose": LOCAL_MODEL_PREFLIGHT_W2_PURPOSE,
+        "track": "local_zero_api_cost",
+        "hypothesis_test_eligible": False,
+        "pricing_config_sha256": expected_pricing_sha256,
+        "preflight_fixture_sha256": LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256,
+    }
+    if (
+        spec.task != "local_model_preflight_w2"
+        or spec.task_registry_name != "local_model_preflight_w2"
+        or spec.task_version != LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION
+        or (spec.metadata or {}) != expected_metadata
+    ):
+        raise ValueError("local W2 preflight task identity differs from the protocol")
+    if spec.model != LOCAL_OLLAMA_MODEL:
+        raise ValueError("local W2 preflight used a different model")
+    if str(spec.model_base_url).rstrip("/") != LOCAL_OLLAMA_BASE_URL:
+        raise ValueError("local W2 preflight used a different provider route")
+    if spec.model_args != {}:
+        raise ValueError("local W2 preflight used unpinned provider arguments")
+    effective_model_config = spec.model_generate_config.merge(
+        log.plan.config
+    ).model_dump(mode="json", exclude_none=True)
+    if effective_model_config != {
+        "max_retries": 0,
+        "max_connections": 1,
+        "adaptive_connections": False,
+        "temperature": 0.0,
+        "seed": seed,
+        "cache": False,
+    }:
+        raise ValueError("local W2 preflight model configuration differs from the pin")
+    revision = spec.revision
+    revision_commit = revision.commit if revision is not None else None
+    if (
+        revision is None
+        or revision.dirty is not False
+        or not isinstance(revision_commit, str)
+        or re.fullmatch(r"[0-9a-f]{7,40}", revision_commit) is None
+        or not expected_git_commit.startswith(revision_commit)
+    ):
+        raise ValueError("local W2 preflight was not run from the frozen clean commit")
+    if spec.config.log_model_api is not True:
+        raise ValueError("local W2 preflight did not retain raw model API calls")
+    if (
+        spec.config.max_samples != 1
+        or spec.config.max_tasks != 1
+        or spec.config.epochs != 1
+    ):
+        raise ValueError("local W2 preflight has an invalid sample/task policy")
+    if log.samples is None or len(log.samples) != 1:
+        raise ValueError("local W2 preflight requires exactly one synthetic sample")
+    sample = log.samples[0]
+    if (
+        sample.id != LOCAL_MODEL_PREFLIGHT_W2_SAMPLE_ID
+        or sample.epoch != 1
+        or sample.error is not None
+        or sample.invalidation is not None
+        or bool(sample.error_retries)
+        or sample.output is None
+    ):
+        raise ValueError("local W2 preflight sample failed or has the wrong identity")
+    if sample.output.model != LOCAL_OLLAMA_MODEL:
+        raise ValueError("local W2 preflight output has the wrong model identity")
+    result = LocalModelPreflightW2Result.model_validate_json(sample.output.completion)
+    serialized_result = result.model_dump(mode="json")
+    if sample.metadata != {"anamnesis.local_preflight_w2": serialized_result}:
+        raise ValueError("local W2 preflight sample metadata differs from its result")
+    if sample.store != {"anamnesis.local_preflight_w2": serialized_result}:
+        raise ValueError("local W2 preflight sample store differs from its result")
+    events = [event for event in sample.events if isinstance(event, ModelEvent)]
+    validate_local_w2_preflight_model_events(
+        events,
+        fixture=fixture,
+        result=result,
+        seed=seed,
+    )
+    return result
+
+
 def validate_local_preflight_artifact(
     artifact: ArtifactPin,
     *,
@@ -311,6 +500,39 @@ def validate_local_preflight_artifact(
     )
 
 
+def validate_local_w2_preflight_artifact(
+    artifact: ArtifactPin,
+    *,
+    fixture_artifact: ArtifactPin,
+    expected_git_commit: str,
+    expected_pricing_sha256: str,
+    seed: int = 101,
+) -> LocalModelPreflightW2Result:
+    """Bind W2 semantics to exact fixture and Inspect `.eval` artifact bytes."""
+
+    fixture_path = Path(fixture_artifact.path)
+    if not fixture_path.is_file():
+        raise ValueError("local W2 preflight fixture artifact does not exist")
+    fixture_content = fixture_path.read_bytes()
+    if fixture_artifact.sha256 != hashlib.sha256(fixture_content).hexdigest():
+        raise ValueError("local W2 preflight fixture artifact hash mismatch")
+    fixture = load_local_w2_preflight_fixture(fixture_path)
+
+    path = Path(artifact.path)
+    if path.suffix != ".eval" or not path.is_file():
+        raise ValueError("local W2 preflight artifact must be an Inspect .eval log")
+    content = path.read_bytes()
+    if artifact.sha256 != hashlib.sha256(content).hexdigest():
+        raise ValueError("local W2 preflight artifact hash mismatch")
+    return validate_local_w2_preflight_log(
+        read_eval_log(path, resolve_attachments=True),
+        fixture=fixture,
+        expected_git_commit=expected_git_commit,
+        expected_pricing_sha256=expected_pricing_sha256,
+        seed=seed,
+    )
+
+
 __all__ = [
     "LOCAL_PREFLIGHT_ACTIVE_STATE",
     "LOCAL_PREFLIGHT_EVENT_ID",
@@ -319,4 +541,7 @@ __all__ = [
     "local_preflight_prompts",
     "validate_local_preflight_artifact",
     "validate_local_preflight_log",
+    "validate_local_w2_preflight_artifact",
+    "validate_local_w2_preflight_log",
+    "validate_local_w2_preflight_model_events",
 ]

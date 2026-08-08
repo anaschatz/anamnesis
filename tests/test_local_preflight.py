@@ -33,10 +33,15 @@ from anamnesis.local_preflight import (
     local_preflight_prompts,
     validate_local_preflight_artifact,
     validate_local_preflight_log,
+    validate_local_w2_preflight_artifact,
+    validate_local_w2_preflight_log,
 )
 from anamnesis.local_runtime import (
     LOCAL_MODEL_PREFLIGHT_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_TASK_VERSION,
+    LOCAL_MODEL_PREFLIGHT_W2_PURPOSE,
+    LOCAL_MODEL_PREFLIGHT_W2_SAMPLE_ID,
+    LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION,
     LOCAL_OLLAMA_BASE_URL,
     LOCAL_OLLAMA_CONTEXT_LENGTH,
     LOCAL_OLLAMA_FAMILY,
@@ -47,9 +52,13 @@ from anamnesis.local_runtime import (
     LOCAL_OLLAMA_SERVICE_MODEL,
     LocalLoadedModelAttestation,
     LocalModelPreflightResult,
+    LocalModelPreflightW2CaseResult,
+    LocalModelPreflightW2Result,
     LocalOllamaRuntimeAttestation,
     _local_decision_schema,
     _local_memory_delta_schema,
+    load_local_w2_preflight_fixture,
+    local_w2_preflight_prompts,
 )
 from anamnesis.schema import Usage
 
@@ -247,6 +256,143 @@ def _valid_log() -> EvalLog:
     )
 
 
+def _valid_w2_log() -> EvalLog:
+    fixture = load_local_w2_preflight_fixture("eval/preflight/local_writer_w2.v1.json")
+    prompts = local_w2_preflight_prompts(fixture)
+    compiler_cases = fixture["compiler_cases"]
+    decision_cases = fixture["decision_cases"]
+    assert isinstance(compiler_cases, list)
+    assert isinstance(decision_cases, list)
+    completions = [
+        json.dumps(case["valid_wire_example"]) for case in compiler_cases
+    ] + [json.dumps(decision_cases[0]["valid_wire_example"])]
+    schemas = [
+        _local_memory_delta_schema(LOCAL_OLLAMA_MODEL),
+        _local_memory_delta_schema(LOCAL_OLLAMA_MODEL),
+        _local_memory_delta_schema(LOCAL_OLLAMA_MODEL),
+        _local_decision_schema(LOCAL_OLLAMA_MODEL),
+    ]
+    events = [
+        _model_event(prompt, schema, completion)
+        for prompt, schema, completion in zip(
+            prompts,
+            schemas,
+            completions,
+            strict=True,
+        )
+    ]
+    case_usage = Usage(
+        input_tokens=100,
+        uncached_input_tokens=100,
+        output_tokens=10,
+        cost_usd=0.0,
+    )
+    result = LocalModelPreflightW2Result(
+        model=LOCAL_OLLAMA_MODEL,
+        runtime=LocalOllamaRuntimeAttestation(
+            model=LOCAL_OLLAMA_MODEL,
+            base_url=LOCAL_OLLAMA_BASE_URL,
+            no_cloud="1",
+            context_length=LOCAL_OLLAMA_CONTEXT_LENGTH,
+            host="127.0.0.1:11434",
+            num_parallel=1,
+            max_loaded_models=1,
+        ),
+        loaded_model=LocalLoadedModelAttestation(
+            model=LOCAL_OLLAMA_SERVICE_MODEL,
+            digest=LOCAL_OLLAMA_MANIFEST_SHA256,
+            family=LOCAL_OLLAMA_FAMILY,
+            parameter_size=LOCAL_OLLAMA_PARAMETER_SIZE,
+            quantization_level=LOCAL_OLLAMA_QUANTIZATION,
+            context_length=LOCAL_OLLAMA_CONTEXT_LENGTH,
+            size_vram=3_169_761_361,
+            ollama_version="0.31.1",
+        ),
+        same_model_for_compiler_and_decision=True,
+        cases=[
+            LocalModelPreflightW2CaseResult(
+                case_id=case_id,  # type: ignore[arg-type]
+                role="compiler" if case_id.startswith("C") else "decision",
+                parse_error=False,
+                semantic_valid=True,
+                usage=case_usage,
+                usage_complete=True,
+                cost_complete=True,
+                latency_ms=1.0,
+            )
+            for case_id in ("C1", "C2", "C3", "D1")
+        ],
+        residency_probe_latency_ms=1.0,
+        fixture_sha256=(
+            "3b82128bab1d801d073118488aa4f0a0a662603b98325f5c9d7dad497f026057"
+        ),
+        passed=True,
+    )
+    sample = EvalSample.model_construct(
+        id=LOCAL_MODEL_PREFLIGHT_W2_SAMPLE_ID,
+        epoch=1,
+        input="Check the frozen local W2 compiler and decision protocol.",
+        target="pass",
+        events=events,
+        metadata={"anamnesis.local_preflight_w2": result.model_dump(mode="json")},
+        store={"anamnesis.local_preflight_w2": result.model_dump(mode="json")},
+        error=None,
+        invalidation=None,
+        error_retries=[],
+        output=ModelOutput.from_content(
+            model=LOCAL_OLLAMA_MODEL,
+            content=result.model_dump_json(),
+        ),
+    )
+    spec = EvalSpec.model_construct(
+        created="2026-01-05T09:00:00+00:00",
+        task="local_model_preflight_w2",
+        task_registry_name="local_model_preflight_w2",
+        task_version=LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION,
+        metadata={
+            "purpose": LOCAL_MODEL_PREFLIGHT_W2_PURPOSE,
+            "track": "local_zero_api_cost",
+            "hypothesis_test_eligible": False,
+            "pricing_config_sha256": LOCAL_PRICING_SHA256,
+            "preflight_fixture_sha256": (
+                "3b82128bab1d801d073118488aa4f0a0a662603b98325f5c9d7dad497f026057"
+            ),
+        },
+        model=LOCAL_OLLAMA_MODEL,
+        model_base_url=LOCAL_OLLAMA_BASE_URL,
+        model_args={},
+        model_generate_config=GenerateConfig(
+            temperature=0.0,
+            seed=101,
+            max_retries=0,
+            max_connections=1,
+            adaptive_connections=False,
+        ),
+        config=EvalConfig(
+            max_samples=1,
+            max_tasks=1,
+            epochs=1,
+            log_model_api=True,
+        ),
+        revision=EvalRevision(
+            type="git",
+            origin="test",
+            commit=COMMIT[:7],
+            dirty=False,
+        ),
+        dataset=EvalDataset(),
+    )
+    return EvalLog.model_construct(
+        status="success",
+        invalidated=False,
+        config_updates=None,
+        log_updates=None,
+        eval=spec,
+        plan=EvalPlan.model_construct(config=GenerateConfig(cache=False)),
+        samples=[sample],
+    )
+
+
 def test_local_preflight_log_accepts_exact_semantic_two_call_gate() -> None:
     validate_local_preflight_log(
         _valid_log(),
@@ -352,3 +498,100 @@ def test_serialized_eval_roundtrip_uses_attachment_resolution(
         expected_git_commit=COMMIT,
         expected_pricing_sha256=LOCAL_PRICING_SHA256,
     )
+
+
+def test_local_w2_preflight_log_accepts_exact_four_call_fixture_gate() -> None:
+    fixture = load_local_w2_preflight_fixture("eval/preflight/local_writer_w2.v1.json")
+
+    result = validate_local_w2_preflight_log(
+        _valid_w2_log(),
+        fixture=fixture,
+        expected_git_commit=COMMIT,
+        expected_pricing_sha256=LOCAL_PRICING_SHA256,
+    )
+
+    assert result.passed
+    assert result.usage.input_tokens == 400
+    assert [case.case_id for case in result.cases] == ["C1", "C2", "C3", "D1"]
+
+
+@pytest.mark.parametrize(
+    ("tamper", "expected"),
+    [
+        ("order", "prompt differs"),
+        ("fifth_call", "exactly four"),
+        ("schema", "unpinned response schema"),
+        ("result", "result flags"),
+        ("metadata", "task identity"),
+    ],
+)
+def test_local_w2_preflight_log_rejects_raw_or_result_drift(
+    tamper: str,
+    expected: str,
+) -> None:
+    fixture = load_local_w2_preflight_fixture("eval/preflight/local_writer_w2.v1.json")
+    log = _valid_w2_log()
+    if tamper == "order":
+        log.samples[0].events[0], log.samples[0].events[1] = (
+            log.samples[0].events[1],
+            log.samples[0].events[0],
+        )
+    elif tamper == "fifth_call":
+        log.samples[0].events.append(log.samples[0].events[0])
+    elif tamper == "schema":
+        log.samples[0].events[0].config.response_schema = _local_decision_schema(
+            LOCAL_OLLAMA_MODEL
+        )
+    elif tamper == "result":
+        raw = json.loads(log.samples[0].output.completion)
+        raw["cases"][0]["semantic_valid"] = False
+        log.samples[0].output.completion = json.dumps(raw)
+        log.samples[0].metadata = {"anamnesis.local_preflight_w2": raw}
+        log.samples[0].store = {"anamnesis.local_preflight_w2": raw}
+    else:
+        log.eval.metadata["preflight_fixture_sha256"] = "0" * 64
+
+    with pytest.raises(ValueError, match=expected):
+        validate_local_w2_preflight_log(
+            log,
+            fixture=fixture,
+            expected_git_commit=COMMIT,
+            expected_pricing_sha256=LOCAL_PRICING_SHA256,
+        )
+
+
+def test_local_w2_preflight_artifact_binds_fixture_and_log_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture_source = Path("eval/preflight/local_writer_w2.v1.json")
+    fixture_path = tmp_path / "local_writer_w2.v1.json"
+    fixture_path.write_bytes(fixture_source.read_bytes())
+    fixture_artifact = ArtifactPin(
+        path=str(fixture_path),
+        sha256=hashlib.sha256(fixture_path.read_bytes()).hexdigest(),
+    )
+    log_path = tmp_path / "model_preflight.eval"
+    log_path.write_bytes(b"pinned W2 Inspect log")
+    log_artifact = ArtifactPin(
+        path=str(log_path),
+        sha256=hashlib.sha256(log_path.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(
+        "anamnesis.local_preflight.read_eval_log",
+        lambda *args, **kwargs: _valid_w2_log(),
+    )
+
+    assert validate_local_w2_preflight_artifact(
+        log_artifact,
+        fixture_artifact=fixture_artifact,
+        expected_git_commit=COMMIT,
+        expected_pricing_sha256=LOCAL_PRICING_SHA256,
+    ).passed
+    with pytest.raises(ValueError, match="fixture artifact hash mismatch"):
+        validate_local_w2_preflight_artifact(
+            log_artifact,
+            fixture_artifact=fixture_artifact.model_copy(update={"sha256": "0" * 64}),
+            expected_git_commit=COMMIT,
+            expected_pricing_sha256=LOCAL_PRICING_SHA256,
+        )

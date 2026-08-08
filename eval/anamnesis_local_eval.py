@@ -21,6 +21,8 @@ from anamnesis.local_experiment import (
     LOCAL_MODEL_ID,
     LOCAL_PRICING_PATH,
     LOCAL_PRICING_SHA256,
+    LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH,
+    LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256,
     LocalExperimentManifest,
     load_ollama_artifact_pin,
     require_local_only_environment,
@@ -28,11 +30,16 @@ from anamnesis.local_experiment import (
     verify_ollama_artifact,
     verify_static_local_inputs,
 )
-from anamnesis.local_preflight import validate_local_preflight_artifact
+from anamnesis.local_preflight import (
+    validate_local_preflight_artifact,
+    validate_local_w2_preflight_artifact,
+)
 from anamnesis.local_runtime import (
     LOCAL_DECISION_VERSION,
     LOCAL_MODEL_PREFLIGHT_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_TASK_VERSION,
+    LOCAL_MODEL_PREFLIGHT_W2_PURPOSE,
+    LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION,
     LOCAL_OLLAMA_CONTEXT_LENGTH,
     LOCAL_SCENARIO_TASK_VERSION,
     LOCAL_ZERO_MODEL_COST,
@@ -41,12 +48,17 @@ from anamnesis.local_runtime import (
     local_decision_schema_contract,
     local_memory_compiler_prompt_contract,
     local_memory_compiler_schema_contract,
+    local_memory_compiler_w2_prompt_contract,
     local_model_preflight_sample,
     local_model_preflight_scorer,
     local_model_preflight_solver,
+    local_model_preflight_w2_sample,
+    local_model_preflight_w2_scorer,
+    local_model_preflight_w2_solver,
     local_scenario_solver,
     local_system_config_sha256,
 )
+from anamnesis.local_wire import LOCAL_MEMORY_COMPILER_W2_VERSION
 from anamnesis.oracle import (
     ORACLE_ANNOTATION_POLICY,
     ORACLE_ARTIFACT_PURPOSE,
@@ -192,12 +204,26 @@ def _validated_local_manifest(
     preflight_path = _repo_artifact_path(manifest.model.preflight.path)
     if manifest.git_commit is None or manifest.model.pricing.sha256 is None:
         raise ValueError("frozen local manifest is missing git/pricing pins")
-    validate_local_preflight_artifact(
-        manifest.model.preflight.model_copy(update={"path": str(preflight_path)}),
-        expected_git_commit=manifest.git_commit,
-        expected_pricing_sha256=manifest.model.pricing.sha256,
-        seed=expected_seed,
-    )
+    if manifest.phase == "writer_diagnostic_w2":
+        if manifest.preflight_fixture is None:
+            raise ValueError("frozen W2 manifest omitted preflight_fixture")
+        fixture_path = _repo_artifact_path(manifest.preflight_fixture.path)
+        validate_local_w2_preflight_artifact(
+            manifest.model.preflight.model_copy(update={"path": str(preflight_path)}),
+            fixture_artifact=manifest.preflight_fixture.model_copy(
+                update={"path": str(fixture_path)}
+            ),
+            expected_git_commit=manifest.git_commit,
+            expected_pricing_sha256=manifest.model.pricing.sha256,
+            seed=expected_seed,
+        )
+    else:
+        validate_local_preflight_artifact(
+            manifest.model.preflight.model_copy(update={"path": str(preflight_path)}),
+            expected_git_commit=manifest.git_commit,
+            expected_pricing_sha256=manifest.model.pricing.sha256,
+            seed=expected_seed,
+        )
     _verify_git_state(manifest.git_commit)
 
     expected_hashes = {
@@ -207,7 +233,9 @@ def _validated_local_manifest(
     if "anamnesis" in manifest.systems:
         expected_hashes.update(
             memory_compiler_prompt_sha256=_sha256_text(
-                local_memory_compiler_prompt_contract()
+                local_memory_compiler_w2_prompt_contract()
+                if manifest.phase == "writer_diagnostic_w2"
+                else local_memory_compiler_prompt_contract()
             ),
             memory_compiler_schema_sha256=_sha256_text(
                 local_memory_compiler_schema_contract()
@@ -233,6 +261,9 @@ def _validated_local_manifest(
                 if name == ORACLE_SYSTEM_NAME
                 and manifest.oracle_annotations is not None
                 else None
+            ),
+            compiler_prompt_variant=(
+                "w2" if manifest.phase == "writer_diagnostic_w2" else "w1"
             ),
         )
         for name in manifest.systems
@@ -270,6 +301,40 @@ def local_model_preflight(seed: int = 101) -> Task:
             "track": "local_zero_api_cost",
             "hypothesis_test_eligible": False,
             "pricing_config_sha256": ACTIVE_LOCAL_PRICING_SHA256,
+        },
+    )
+
+
+@task
+def local_model_preflight_w2(seed: int = 101) -> Task:
+    """Frozen four-call W2 semantic gate; never a scenario evaluation."""
+
+    if seed != 101:
+        raise ValueError("local W2 preflight requires seed 101 exactly")
+    fixture_path = _repo_artifact_path(LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH)
+    if hashlib.sha256(fixture_path.read_bytes()).hexdigest() != (
+        LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256
+    ):
+        raise ValueError("tracked W2 preflight fixture differs from its pin")
+    return Task(
+        dataset=[local_model_preflight_w2_sample()],
+        solver=local_model_preflight_w2_solver(str(fixture_path)),
+        scorer=local_model_preflight_w2_scorer(),
+        config=GenerateConfig(
+            temperature=0.0,
+            seed=seed,
+            cache=False,
+            max_retries=0,
+            max_connections=1,
+            adaptive_connections=False,
+        ),
+        version=LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION,
+        metadata={
+            "purpose": LOCAL_MODEL_PREFLIGHT_W2_PURPOSE,
+            "track": "local_zero_api_cost",
+            "hypothesis_test_eligible": False,
+            "pricing_config_sha256": ACTIVE_LOCAL_PRICING_SHA256,
+            "preflight_fixture_sha256": (LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256),
         },
     )
 
@@ -314,6 +379,14 @@ def _system_task(
             raise ValueError("frozen oracle manifest omitted annotation SHA-256")
     elif oracle_annotations_path is not None:
         raise ValueError("oracle_annotations_path is only valid for the oracle task")
+    compiler_prompt_variant = "w2" if frozen.phase == "writer_diagnostic_w2" else "w1"
+    w2_preflight_fixture_path: str | None = None
+    if frozen.phase == "writer_diagnostic_w2":
+        if frozen.preflight_fixture is None:
+            raise ValueError("frozen W2 manifest omitted preflight_fixture")
+        w2_preflight_fixture_path = str(
+            _repo_artifact_path(frozen.preflight_fixture.path)
+        )
     return Task(
         dataset=_scenario_dataset(
             dataset_path,
@@ -337,6 +410,8 @@ def _system_task(
             pricing_config_sha256=frozen.model.pricing.sha256,
             oracle_annotations_path=oracle_runtime_path,
             oracle_annotations_sha256=oracle_annotations_sha256,
+            compiler_prompt_variant=compiler_prompt_variant,
+            w2_preflight_fixture_path=w2_preflight_fixture_path,
         ),
         scorer=scenario_run_scorer(),
         config=GenerateConfig(
@@ -365,6 +440,30 @@ def _system_task(
             "pricing_config_sha256": ACTIVE_LOCAL_PRICING_SHA256,
             "electricity_measured": False,
             "decision_prompt_version": LOCAL_DECISION_VERSION,
+            **(
+                {
+                    "compiler_mode": "llm",
+                    "memory_compiler_prompt_version": (
+                        LOCAL_MEMORY_COMPILER_W2_VERSION
+                    ),
+                    "preflight_fixture_sha256": (
+                        LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256
+                    ),
+                    "setup_preflight_task": "local_model_preflight_w2",
+                    "setup_preflight_model_calls": 4,
+                    "setup_preflight_compiler_calls": 3,
+                    "setup_preflight_decision_calls": 1,
+                    "setup_preflight_usage_in_headline": False,
+                    "same_model_for_compiler_and_decision": True,
+                    "scenario_compiler_model_calls": sum(
+                        event.kind != "clock_tick"
+                        for scenario in scenarios
+                        for event in scenario.events
+                    ),
+                }
+                if frozen.phase == "writer_diagnostic_w2"
+                else {}
+            ),
             **(
                 {
                     "compiler_mode": frozen.compiler_mode,
@@ -472,6 +571,23 @@ def local_anamnesis_writer_diagnostic(
         manifest=manifest,
         ollama_models_dir=ollama_models_dir,
         required_phase="writer_diagnostic",
+    )
+
+
+@task
+def local_anamnesis_writer_diagnostic_w2(
+    seed: int | None = None,
+    repetition: int = 1,
+    manifest: str | None = None,
+    ollama_models_dir: str | None = None,
+) -> Task:
+    return _system_task(
+        "anamnesis",
+        seed=seed,
+        repetition=repetition,
+        manifest=manifest,
+        ollama_models_dir=ollama_models_dir,
+        required_phase="writer_diagnostic_w2",
     )
 
 

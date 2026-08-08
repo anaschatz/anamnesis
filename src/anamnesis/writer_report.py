@@ -938,6 +938,25 @@ def _write_provenance(
 
 
 def writer_report_main(argv: Sequence[str] | None = None) -> int:
+    # The existing CLI remains the single entrypoint. Select the isolated W2
+    # reporter only from the manifest phase; task names or output paths cannot
+    # silently switch protocols.
+    phase_probe = argparse.ArgumentParser(add_help=False)
+    phase_probe.add_argument("--manifest", type=Path)
+    phase_args, _ = phase_probe.parse_known_args(argv)
+    if phase_args.manifest is not None:
+        try:
+            raw_manifest = json.loads(phase_args.manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raw_manifest = None
+        if (
+            isinstance(raw_manifest, dict)
+            and raw_manifest.get("phase") == "writer_diagnostic_w2"
+        ):
+            from anamnesis.writer_report_w2 import writer_report_w2_main
+
+            return writer_report_w2_main(argv)
+
     parser = argparse.ArgumentParser(
         description="Validate and score the strict local W1 writer diagnostic"
     )

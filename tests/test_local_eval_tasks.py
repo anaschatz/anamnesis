@@ -16,11 +16,13 @@ def test_local_task_registry_names_are_isolated_and_frozen() -> None:
     module = runpy.run_path("eval/anamnesis_local_eval.py")
     expected = {
         "local_model_preflight",
+        "local_model_preflight_w2",
         "local_no_memory",
         "local_full_context",
         "local_vector_rag",
         "local_anamnesis",
         "local_anamnesis_writer_diagnostic",
+        "local_anamnesis_writer_diagnostic_w2",
         "local_anamnesis_oracle_compiler",
     }
 
@@ -41,6 +43,14 @@ def test_local_task_registry_names_are_isolated_and_frozen() -> None:
     assert task.config.adaptive_connections is False
     assert task.metadata["hypothesis_test_eligible"] is False
     assert task.metadata["pricing_config_sha256"] == LOCAL_PRICING_SHA256
+    w2_task = module["local_model_preflight_w2"]()
+    assert w2_task.version == "local.w2.0.1"
+    assert w2_task.config.seed == 101
+    assert w2_task.metadata["preflight_fixture_sha256"] == (
+        "3b82128bab1d801d073118488aa4f0a0a662603b98325f5c9d7dad497f026057"
+    )
+    with pytest.raises(ValueError, match="seed 101 exactly"):
+        module["local_model_preflight_w2"](seed=202)
 
 
 def test_local_scenario_tasks_fail_closed_without_frozen_manifest() -> None:
@@ -52,6 +62,7 @@ def test_local_scenario_tasks_fail_closed_without_frozen_manifest() -> None:
         "local_vector_rag",
         "local_anamnesis",
         "local_anamnesis_writer_diagnostic",
+        "local_anamnesis_writer_diagnostic_w2",
         "local_anamnesis_oracle_compiler",
     ):
         with pytest.raises(ValueError, match="frozen local manifest"):
@@ -200,6 +211,48 @@ def test_local_writer_task_rejects_smoke_phase(
             manifest="ignored-by-test.json",
             ollama_models_dir="/ignored/by/test",
         )
+
+
+def test_local_writer_w2_task_binds_v3_and_stays_reference_blind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = runpy.run_path("eval/anamnesis_local_eval.py")
+    raw = json.loads(
+        Path("eval/local_writer_w2_experiment_manifest.template.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    raw["system_config_sha256"] = {"anamnesis": "d" * 64}
+    manifest = LocalExperimentManifest.model_validate(raw)
+    dataset_path = Path("eval/scenarios/writer_diagnostic.v3.jsonl").resolve()
+    system_task = module["_system_task"]
+    monkeypatch.setitem(
+        system_task.__globals__,  # type: ignore[attr-defined]
+        "_validated_local_manifest",
+        lambda *args, **kwargs: (manifest, "e" * 64, dataset_path),
+    )
+
+    task = module["local_anamnesis_writer_diagnostic_w2"](
+        seed=101,
+        repetition=1,
+        manifest="ignored-by-test.json",
+        ollama_models_dir="/ignored/by/test",
+    )
+
+    assert task.metadata["dataset"] == "eval/scenarios/writer_diagnostic.v3.jsonl"
+    assert task.metadata["dataset_split"] == "writer_diagnostic_w2"
+    assert task.metadata["dataset_scenario_count"] == 10
+    assert task.metadata["memory_compiler_prompt_version"] == "local.v0.3"
+    assert task.metadata["setup_preflight_model_calls"] == 4
+    assert task.metadata["scenario_compiler_model_calls"] == 46
+    assert task.metadata["setup_preflight_usage_in_headline"] is False
+    metadata_json = json.dumps(task.metadata, sort_keys=True)
+    assert manifest.writer_reference is not None
+    assert manifest.writer_reference.path not in metadata_json
+    assert manifest.writer_reference.sha256 not in metadata_json
+    solver_params = json.dumps(task.solver.__registry_params__, sort_keys=True)  # type: ignore[attr-defined]
+    assert manifest.writer_reference.path not in solver_params
+    assert manifest.writer_reference.sha256 not in solver_params
 
 
 def test_local_phase_mismatch_fails_before_runtime_or_artifact_io(

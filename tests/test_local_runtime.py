@@ -26,6 +26,7 @@ from anamnesis.local_runtime import (
     LOCAL_ZERO_MODEL_COST,
     LocalDecisionWire,
     LocalLoadedModelAttestation,
+    LocalModelPreflightW2Result,
     LocalOllamaRuntimeAttestation,
     _loaded_model_from_ps,
     _local_memory_delta_schema,
@@ -34,20 +35,25 @@ from anamnesis.local_runtime import (
     _verify_effective_zero_model_cost,
     _verify_local_ollama_runtime,
     build_local_decision_prompt,
+    load_local_w2_preflight_fixture,
     local_decision_contract,
     local_decision_prompt_contract,
     local_decision_schema_contract,
     local_memory_compiler_prompt_contract,
     local_memory_compiler_schema_contract,
     local_memory_compiler_transport_contract,
+    local_memory_compiler_w2_prompt_contract,
+    local_memory_compiler_w2_transport_contract,
     local_scenario_solver,
     local_system_config_sha256,
     run_local_model_preflight,
+    run_local_model_preflight_w2,
 )
 from anamnesis.local_wire import (
     LOCAL_MEMORY_COMPILER_INSTRUCTIONS,
     LOCAL_MEMORY_COMPILER_VERSION,
     build_local_memory_compiler_prompt,
+    build_local_memory_compiler_w2_prompt,
 )
 from anamnesis.memory import CancelIntent, MemoryDelta
 from anamnesis.oracle import (
@@ -737,6 +743,103 @@ def test_semantic_preflight_requires_17h_intent_and_no_current_action() -> None:
     assert result.decision_semantic_valid
     assert result.compiler_usage.cost_usd == 0.0
     assert result.loaded_model == _loaded_model()
+
+
+def test_w2_preflight_sends_only_ordered_inputs_and_accepts_all_four_cases() -> None:
+    fixture = load_local_w2_preflight_fixture("eval/preflight/local_writer_w2.v1.json")
+    compiler_cases = fixture["compiler_cases"]
+    assert isinstance(compiler_cases, list)
+    completions = [json.dumps(case["valid_wire_example"]) for case in compiler_cases]
+
+    class FakeW2Model:
+        name = LOCAL_OLLAMA_MODEL
+        runtime_attestation = LocalOllamaRuntimeAttestation(
+            model=LOCAL_OLLAMA_MODEL,
+            base_url=LOCAL_OLLAMA_BASE_URL,
+            no_cloud="1",
+            context_length=LOCAL_OLLAMA_CONTEXT_LENGTH,
+            host="127.0.0.1:11434",
+            num_parallel=1,
+            max_loaded_models=1,
+        )
+
+        def __init__(self) -> None:
+            self.compiler_prompts: list[str] = []
+
+        async def complete_structured(self, *, prompt, response_schema):
+            index = len(self.compiler_prompts)
+            self.compiler_prompts.append(prompt)
+            return (
+                ModelOutput(
+                    model=LOCAL_OLLAMA_SERVICE_MODEL,
+                    completion=completions[index],
+                    usage=_model_usage(100 + index, 10),
+                ),
+                2.0,
+            )
+
+        async def decide(self, request: DecisionRequest) -> DecisionCall:
+            return DecisionCall(
+                decision=Decision(),
+                usage=Usage(
+                    input_tokens=120,
+                    uncached_input_tokens=120,
+                    output_tokens=4,
+                    cost_usd=0.0,
+                ),
+                latency_ms=3.0,
+                raw_completion='{"mode":"no_action","actions":[]}',
+                usage_complete=True,
+                cost_complete=True,
+            )
+
+    model = FakeW2Model()
+    result = asyncio.run(
+        run_local_model_preflight_w2(  # type: ignore[arg-type]
+            model,
+            fixture=fixture,
+            residency_probe=_loaded_model,
+        )
+    )
+
+    assert isinstance(result, LocalModelPreflightW2Result)
+    assert result.passed
+    assert [case.case_id for case in result.cases] == ["C1", "C2", "C3", "D1"]
+    assert all(case.semantic_valid for case in result.cases)
+    assert len(model.compiler_prompts) == 3
+    for prompt, case in zip(model.compiler_prompts, compiler_cases, strict=True):
+        assert prompt == build_local_memory_compiler_w2_prompt(
+            event=ObservableEvent.model_validate(case["input"]["event"]),
+            active_state=case["input"]["active_state"],
+        )
+        assert str(case["category"]) not in prompt
+        assert "valid_wire_example" not in prompt
+        assert "acceptance" not in prompt
+
+
+def test_w2_contract_and_system_hash_are_distinct_without_changing_w1() -> None:
+    w1_transport = local_memory_compiler_transport_contract()
+    w2_transport = local_memory_compiler_w2_transport_contract()
+
+    assert local_memory_compiler_prompt_contract() != (
+        local_memory_compiler_w2_prompt_contract()
+    )
+    assert w1_transport != w2_transport
+    w1_hash = local_system_config_sha256(
+        system="anamnesis",
+        pricing_config_sha256="1" * 64,
+    )
+    w2_hash = local_system_config_sha256(
+        system="anamnesis",
+        pricing_config_sha256="1" * 64,
+        compiler_prompt_variant="w2",
+    )
+    assert w1_hash != w2_hash
+    with pytest.raises(ValueError, match="requires system=anamnesis"):
+        local_system_config_sha256(
+            system="full_context",
+            compiler_prompt_variant="w2",
+        )
 
 
 def test_runner_hashes_and_labels_the_actual_local_prompt() -> None:

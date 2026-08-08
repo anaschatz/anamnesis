@@ -30,6 +30,18 @@ LOCAL_WRITER_REFERENCE_PATH = "eval/oracle/writer_diagnostic_memory_deltas.v1.js
 LOCAL_WRITER_REFERENCE_SHA256 = (
     "93c24d604b32c838d635f9c9ed4fea20f770da254f522db6962b6bc57a232057"
 )
+LOCAL_WRITER_W2_DATASET_PATH = "eval/scenarios/writer_diagnostic.v3.jsonl"
+LOCAL_WRITER_W2_DATASET_SHA256 = (
+    "34e2e8751bf32a3a2e29ac75d727f2b5cf73aaba13ccc9ba1d9fdf00bf7eaf4f"
+)
+LOCAL_WRITER_W2_REFERENCE_PATH = "eval/oracle/writer_diagnostic_memory_deltas.v3.json"
+LOCAL_WRITER_W2_REFERENCE_SHA256 = (
+    "7adb64eda15daf5351260933fbd0625fbc13c6899361735a9bf0ce13c063f857"
+)
+LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH = "eval/preflight/local_writer_w2.v1.json"
+LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256 = (
+    "3b82128bab1d801d073118488aa4f0a0a662603b98325f5c9d7dad497f026057"
+)
 LOCAL_OLLAMA_VERSION = "0.31.1"
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -146,9 +158,10 @@ class LocalExecutionPolicy(StrictModel):
     max_retries: Literal[0] = 0
     structured_output_repair_calls: Literal[0] = 0
     log_model_api: Literal[True] = True
-    warmup_policy: Literal["one_unmeasured_call_per_schema"] = (
-        "one_unmeasured_call_per_schema"
-    )
+    warmup_policy: Literal[
+        "one_unmeasured_call_per_schema",
+        "frozen_w2_semantic_gate_c1_c2_c3_d1",
+    ] = "one_unmeasured_call_per_schema"
     warmup_latency_in_headline: Literal[False] = False
 
     @model_validator(mode="after")
@@ -168,7 +181,13 @@ class LocalExperimentManifest(StrictModel):
     claim_scope: Literal["diagnostic_development_only"] = "diagnostic_development_only"
     hypothesis_test_eligible: Literal[False] = False
     status: Literal["draft", "frozen"] = "draft"
-    phase: Literal["smoke", "baseline", "oracle_smoke", "writer_diagnostic"]
+    phase: Literal[
+        "smoke",
+        "baseline",
+        "oracle_smoke",
+        "writer_diagnostic",
+        "writer_diagnostic_w2",
+    ]
     compiler_mode: Literal["llm", "oracle"] = "llm"
     dataset: ArtifactPin
     scenario_count: int = Field(ge=1)
@@ -186,6 +205,7 @@ class LocalExperimentManifest(StrictModel):
     architecture_contract: ArtifactPin
     oracle_annotations: ArtifactPin | None = None
     writer_reference: ArtifactPin | None = None
+    preflight_fixture: ArtifactPin | None = None
     decision_prompt_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     decision_schema_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     memory_compiler_prompt_sha256: str | None = Field(
@@ -227,6 +247,13 @@ class LocalExperimentManifest(StrictModel):
                 "seeds": LOCAL_SMOKE_SEEDS,
                 "dataset": "eval/scenarios/writer_diagnostic.v1.jsonl",
             },
+            "writer_diagnostic_w2": {
+                "systems": LOCAL_WRITER_DIAGNOSTIC_SYSTEMS,
+                "count": 10,
+                "sealed": False,
+                "seeds": LOCAL_SMOKE_SEEDS,
+                "dataset": LOCAL_WRITER_W2_DATASET_PATH,
+            },
         }[self.phase]
 
         expected_systems = matrix["systems"]
@@ -249,6 +276,14 @@ class LocalExperimentManifest(StrictModel):
             raise ValueError(
                 f"local {self.phase} phase requires dataset {matrix['dataset']}"
             )
+        if (
+            self.phase == "writer_diagnostic_w2"
+            and self.dataset.sha256 != LOCAL_WRITER_W2_DATASET_SHA256
+        ):
+            raise ValueError(
+                "local writer_diagnostic_w2 dataset.sha256 must be "
+                f"{LOCAL_WRITER_W2_DATASET_SHA256}"
+            )
         if self.execution.seeds != matrix["seeds"]:
             raise ValueError(
                 f"local {self.phase} phase requires seeds {matrix['seeds']} exactly"
@@ -256,6 +291,16 @@ class LocalExperimentManifest(StrictModel):
         if self.execution.repetitions != len(matrix["seeds"]):
             raise ValueError(
                 f"local {self.phase} phase requires {len(matrix['seeds'])} repetitions"
+            )
+        expected_warmup_policy = (
+            "frozen_w2_semantic_gate_c1_c2_c3_d1"
+            if self.phase == "writer_diagnostic_w2"
+            else "one_unmeasured_call_per_schema"
+        )
+        if self.execution.warmup_policy != expected_warmup_policy:
+            raise ValueError(
+                f"local {self.phase} phase requires warmup_policy="
+                f"{expected_warmup_policy}"
             )
 
         if self.model.artifact.path != LOCAL_MODEL_ARTIFACT_PATH:
@@ -284,24 +329,55 @@ class LocalExperimentManifest(StrictModel):
                 f"local {self.phase} requires same_model_for_compiler_and_decision=true"
             )
 
-        if self.phase == "writer_diagnostic":
+        if self.phase in {"writer_diagnostic", "writer_diagnostic_w2"}:
+            expected_reference_path = (
+                LOCAL_WRITER_REFERENCE_PATH
+                if self.phase == "writer_diagnostic"
+                else LOCAL_WRITER_W2_REFERENCE_PATH
+            )
+            expected_reference_sha256 = (
+                LOCAL_WRITER_REFERENCE_SHA256
+                if self.phase == "writer_diagnostic"
+                else LOCAL_WRITER_W2_REFERENCE_SHA256
+            )
             if self.writer_reference is None:
+                raise ValueError(f"local {self.phase} phase requires writer_reference")
+            if self.writer_reference.path != expected_reference_path:
                 raise ValueError(
-                    "local writer_diagnostic phase requires writer_reference"
+                    f"local {self.phase} writer_reference.path must be "
+                    f"{expected_reference_path}"
                 )
-            if self.writer_reference.path != LOCAL_WRITER_REFERENCE_PATH:
+            if self.writer_reference.sha256 != expected_reference_sha256:
                 raise ValueError(
-                    "local writer_diagnostic writer_reference.path must be "
-                    f"{LOCAL_WRITER_REFERENCE_PATH}"
-                )
-            if self.writer_reference.sha256 != LOCAL_WRITER_REFERENCE_SHA256:
-                raise ValueError(
-                    "local writer_diagnostic writer_reference.sha256 must be "
-                    f"{LOCAL_WRITER_REFERENCE_SHA256}"
+                    f"local {self.phase} writer_reference.sha256 must be "
+                    f"{expected_reference_sha256}"
                 )
         elif self.writer_reference is not None:
             raise ValueError(
-                "writer_reference is only valid for local writer_diagnostic"
+                "writer_reference is only valid for local writer diagnostics"
+            )
+
+        if self.phase == "writer_diagnostic_w2":
+            if self.preflight_fixture is None:
+                raise ValueError(
+                    "local writer_diagnostic_w2 phase requires preflight_fixture"
+                )
+            if self.preflight_fixture.path != LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH:
+                raise ValueError(
+                    "local writer_diagnostic_w2 preflight_fixture.path must be "
+                    f"{LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH}"
+                )
+            if (
+                self.preflight_fixture.sha256
+                != LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256
+            ):
+                raise ValueError(
+                    "local writer_diagnostic_w2 preflight_fixture.sha256 must be "
+                    f"{LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256}"
+                )
+        elif self.preflight_fixture is not None:
+            raise ValueError(
+                "preflight_fixture is only valid for local writer_diagnostic_w2"
             )
 
         invalid_hashes = {
@@ -339,11 +415,16 @@ class LocalExperimentManifest(StrictModel):
                 missing.append("oracle_annotations")
             elif self.oracle_annotations.sha256 is None:
                 missing.append("oracle_annotations.sha256")
-        if self.phase == "writer_diagnostic":
+        if self.phase in {"writer_diagnostic", "writer_diagnostic_w2"}:
             if self.writer_reference is None:
                 missing.append("writer_reference")
             elif self.writer_reference.sha256 is None:
                 missing.append("writer_reference.sha256")
+        if self.phase == "writer_diagnostic_w2":
+            if self.preflight_fixture is None:
+                missing.append("preflight_fixture")
+            elif self.preflight_fixture.sha256 is None:
+                missing.append("preflight_fixture.sha256")
         for name in ("git_commit", "decision_prompt_sha256", "decision_schema_sha256"):
             if getattr(self, name) is None:
                 missing.append(name)
@@ -448,6 +529,8 @@ def verify_static_local_inputs(
         manifest.architecture_contract,
         manifest.dataset,
     )
+    if manifest.preflight_fixture is not None:
+        artifacts = (*artifacts, manifest.preflight_fixture)
     if manifest.oracle_annotations is not None:
         artifacts = (*artifacts, manifest.oracle_annotations)
     # writer_reference is a gold-derived reporter input. The manifest schema
@@ -558,6 +641,12 @@ __all__ = [
     "LOCAL_MODEL_ID",
     "LOCAL_OLLAMA_VERSION",
     "LOCAL_PRICING_PATH",
+    "LOCAL_WRITER_W2_DATASET_PATH",
+    "LOCAL_WRITER_W2_DATASET_SHA256",
+    "LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH",
+    "LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256",
+    "LOCAL_WRITER_W2_REFERENCE_PATH",
+    "LOCAL_WRITER_W2_REFERENCE_SHA256",
     "LOCAL_PRICING_SHA256",
     "LOCAL_WRITER_REFERENCE_PATH",
     "LOCAL_WRITER_REFERENCE_SHA256",
