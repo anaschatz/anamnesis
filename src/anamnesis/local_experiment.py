@@ -42,6 +42,24 @@ LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH = "eval/preflight/local_writer_w2.v1.json
 LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256 = (
     "3b82128bab1d801d073118488aa4f0a0a662603b98325f5c9d7dad497f026057"
 )
+LOCAL_WRITER_W3_DATASET_PATH = "eval/scenarios/writer_diagnostic.v4.jsonl"
+LOCAL_WRITER_W3_DATASET_SHA256 = (
+    "6b2530cb9f3426c792500f07e854d7f31ad84081ac77104cb8032737234ff91c"
+)
+LOCAL_WRITER_W3_REFERENCE_PATH = "eval/oracle/writer_diagnostic_memory_deltas.v4.json"
+LOCAL_WRITER_W3_REFERENCE_SHA256 = (
+    "72308bb34bda758cc72dc651e3f0fd2fd2bd1bff820479e2cf0774ee8d66cf5c"
+)
+LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_PATH = "eval/preflight/local_writer_w3.v1.json"
+LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256 = (
+    "5628c3c1d7f8e1a5da43d6e567d55ac8e4fbabd8b9c4054325de6f4def1da30c"
+)
+LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_PATH = (
+    "eval/preflight/local_writer_w3.protocol.v1.json"
+)
+LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256 = (
+    "7f63c156a8af74ced2d5e5530b3e8083da95c7f46e14e1afafaaf864b3ce1915"
+)
 LOCAL_OLLAMA_VERSION = "0.31.1"
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -161,6 +179,7 @@ class LocalExecutionPolicy(StrictModel):
     warmup_policy: Literal[
         "one_unmeasured_call_per_schema",
         "frozen_w2_semantic_gate_c1_c2_c3_d1",
+        "frozen_w3_semantic_gate_c1_to_c8_d1",
     ] = "one_unmeasured_call_per_schema"
     warmup_latency_in_headline: Literal[False] = False
 
@@ -187,6 +206,7 @@ class LocalExperimentManifest(StrictModel):
         "oracle_smoke",
         "writer_diagnostic",
         "writer_diagnostic_w2",
+        "writer_diagnostic_w3",
     ]
     compiler_mode: Literal["llm", "oracle"] = "llm"
     dataset: ArtifactPin
@@ -206,6 +226,7 @@ class LocalExperimentManifest(StrictModel):
     oracle_annotations: ArtifactPin | None = None
     writer_reference: ArtifactPin | None = None
     preflight_fixture: ArtifactPin | None = None
+    preflight_protocol: ArtifactPin | None = None
     decision_prompt_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     decision_schema_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     memory_compiler_prompt_sha256: str | None = Field(
@@ -254,6 +275,13 @@ class LocalExperimentManifest(StrictModel):
                 "seeds": LOCAL_SMOKE_SEEDS,
                 "dataset": LOCAL_WRITER_W2_DATASET_PATH,
             },
+            "writer_diagnostic_w3": {
+                "systems": LOCAL_WRITER_DIAGNOSTIC_SYSTEMS,
+                "count": 10,
+                "sealed": False,
+                "seeds": LOCAL_SMOKE_SEEDS,
+                "dataset": LOCAL_WRITER_W3_DATASET_PATH,
+            },
         }[self.phase]
 
         expected_systems = matrix["systems"]
@@ -284,6 +312,14 @@ class LocalExperimentManifest(StrictModel):
                 "local writer_diagnostic_w2 dataset.sha256 must be "
                 f"{LOCAL_WRITER_W2_DATASET_SHA256}"
             )
+        if (
+            self.phase == "writer_diagnostic_w3"
+            and self.dataset.sha256 != LOCAL_WRITER_W3_DATASET_SHA256
+        ):
+            raise ValueError(
+                "local writer_diagnostic_w3 dataset.sha256 must be "
+                f"{LOCAL_WRITER_W3_DATASET_SHA256}"
+            )
         if self.execution.seeds != matrix["seeds"]:
             raise ValueError(
                 f"local {self.phase} phase requires seeds {matrix['seeds']} exactly"
@@ -292,11 +328,14 @@ class LocalExperimentManifest(StrictModel):
             raise ValueError(
                 f"local {self.phase} phase requires {len(matrix['seeds'])} repetitions"
             )
-        expected_warmup_policy = (
-            "frozen_w2_semantic_gate_c1_c2_c3_d1"
-            if self.phase == "writer_diagnostic_w2"
-            else "one_unmeasured_call_per_schema"
-        )
+        expected_warmup_policy = {
+            "smoke": "one_unmeasured_call_per_schema",
+            "baseline": "one_unmeasured_call_per_schema",
+            "oracle_smoke": "one_unmeasured_call_per_schema",
+            "writer_diagnostic": "one_unmeasured_call_per_schema",
+            "writer_diagnostic_w2": "frozen_w2_semantic_gate_c1_c2_c3_d1",
+            "writer_diagnostic_w3": "frozen_w3_semantic_gate_c1_to_c8_d1",
+        }[self.phase]
         if self.execution.warmup_policy != expected_warmup_policy:
             raise ValueError(
                 f"local {self.phase} phase requires warmup_policy="
@@ -329,17 +368,21 @@ class LocalExperimentManifest(StrictModel):
                 f"local {self.phase} requires same_model_for_compiler_and_decision=true"
             )
 
-        if self.phase in {"writer_diagnostic", "writer_diagnostic_w2"}:
-            expected_reference_path = (
-                LOCAL_WRITER_REFERENCE_PATH
-                if self.phase == "writer_diagnostic"
-                else LOCAL_WRITER_W2_REFERENCE_PATH
-            )
-            expected_reference_sha256 = (
-                LOCAL_WRITER_REFERENCE_SHA256
-                if self.phase == "writer_diagnostic"
-                else LOCAL_WRITER_W2_REFERENCE_SHA256
-            )
+        if self.phase in {
+            "writer_diagnostic",
+            "writer_diagnostic_w2",
+            "writer_diagnostic_w3",
+        }:
+            expected_reference_path = {
+                "writer_diagnostic": LOCAL_WRITER_REFERENCE_PATH,
+                "writer_diagnostic_w2": LOCAL_WRITER_W2_REFERENCE_PATH,
+                "writer_diagnostic_w3": LOCAL_WRITER_W3_REFERENCE_PATH,
+            }[self.phase]
+            expected_reference_sha256 = {
+                "writer_diagnostic": LOCAL_WRITER_REFERENCE_SHA256,
+                "writer_diagnostic_w2": LOCAL_WRITER_W2_REFERENCE_SHA256,
+                "writer_diagnostic_w3": LOCAL_WRITER_W3_REFERENCE_SHA256,
+            }[self.phase]
             if self.writer_reference is None:
                 raise ValueError(f"local {self.phase} phase requires writer_reference")
             if self.writer_reference.path != expected_reference_path:
@@ -357,27 +400,53 @@ class LocalExperimentManifest(StrictModel):
                 "writer_reference is only valid for local writer diagnostics"
             )
 
-        if self.phase == "writer_diagnostic_w2":
+        if self.phase in {"writer_diagnostic_w2", "writer_diagnostic_w3"}:
+            expected_fixture_path = {
+                "writer_diagnostic_w2": LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH,
+                "writer_diagnostic_w3": LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_PATH,
+            }[self.phase]
+            expected_fixture_sha256 = {
+                "writer_diagnostic_w2": LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256,
+                "writer_diagnostic_w3": LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256,
+            }[self.phase]
             if self.preflight_fixture is None:
+                raise ValueError(f"local {self.phase} phase requires preflight_fixture")
+            if self.preflight_fixture.path != expected_fixture_path:
                 raise ValueError(
-                    "local writer_diagnostic_w2 phase requires preflight_fixture"
+                    f"local {self.phase} preflight_fixture.path must be "
+                    f"{expected_fixture_path}"
                 )
-            if self.preflight_fixture.path != LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH:
+            if self.preflight_fixture.sha256 != expected_fixture_sha256:
                 raise ValueError(
-                    "local writer_diagnostic_w2 preflight_fixture.path must be "
-                    f"{LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH}"
-                )
-            if (
-                self.preflight_fixture.sha256
-                != LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256
-            ):
-                raise ValueError(
-                    "local writer_diagnostic_w2 preflight_fixture.sha256 must be "
-                    f"{LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256}"
+                    f"local {self.phase} preflight_fixture.sha256 must be "
+                    f"{expected_fixture_sha256}"
                 )
         elif self.preflight_fixture is not None:
             raise ValueError(
-                "preflight_fixture is only valid for local writer_diagnostic_w2"
+                "preflight_fixture is only valid for local W2/W3 writer diagnostics"
+            )
+
+        if self.phase == "writer_diagnostic_w3":
+            if self.preflight_protocol is None:
+                raise ValueError(
+                    "local writer_diagnostic_w3 phase requires preflight_protocol"
+                )
+            if self.preflight_protocol.path != LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_PATH:
+                raise ValueError(
+                    "local writer_diagnostic_w3 preflight_protocol.path must be "
+                    f"{LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_PATH}"
+                )
+            if (
+                self.preflight_protocol.sha256
+                != LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256
+            ):
+                raise ValueError(
+                    "local writer_diagnostic_w3 preflight_protocol.sha256 must be "
+                    f"{LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256}"
+                )
+        elif self.preflight_protocol is not None:
+            raise ValueError(
+                "preflight_protocol is only valid for local writer_diagnostic_w3"
             )
 
         invalid_hashes = {
@@ -415,16 +484,25 @@ class LocalExperimentManifest(StrictModel):
                 missing.append("oracle_annotations")
             elif self.oracle_annotations.sha256 is None:
                 missing.append("oracle_annotations.sha256")
-        if self.phase in {"writer_diagnostic", "writer_diagnostic_w2"}:
+        if self.phase in {
+            "writer_diagnostic",
+            "writer_diagnostic_w2",
+            "writer_diagnostic_w3",
+        }:
             if self.writer_reference is None:
                 missing.append("writer_reference")
             elif self.writer_reference.sha256 is None:
                 missing.append("writer_reference.sha256")
-        if self.phase == "writer_diagnostic_w2":
+        if self.phase in {"writer_diagnostic_w2", "writer_diagnostic_w3"}:
             if self.preflight_fixture is None:
                 missing.append("preflight_fixture")
             elif self.preflight_fixture.sha256 is None:
                 missing.append("preflight_fixture.sha256")
+        if self.phase == "writer_diagnostic_w3":
+            if self.preflight_protocol is None:
+                missing.append("preflight_protocol")
+            elif self.preflight_protocol.sha256 is None:
+                missing.append("preflight_protocol.sha256")
         for name in ("git_commit", "decision_prompt_sha256", "decision_schema_sha256"):
             if getattr(self, name) is None:
                 missing.append(name)
@@ -531,6 +609,8 @@ def verify_static_local_inputs(
     )
     if manifest.preflight_fixture is not None:
         artifacts = (*artifacts, manifest.preflight_fixture)
+    if manifest.preflight_protocol is not None:
+        artifacts = (*artifacts, manifest.preflight_protocol)
     if manifest.oracle_annotations is not None:
         artifacts = (*artifacts, manifest.oracle_annotations)
     # writer_reference is a gold-derived reporter input. The manifest schema
@@ -647,6 +727,14 @@ __all__ = [
     "LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256",
     "LOCAL_WRITER_W2_REFERENCE_PATH",
     "LOCAL_WRITER_W2_REFERENCE_SHA256",
+    "LOCAL_WRITER_W3_DATASET_PATH",
+    "LOCAL_WRITER_W3_DATASET_SHA256",
+    "LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_PATH",
+    "LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256",
+    "LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_PATH",
+    "LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256",
+    "LOCAL_WRITER_W3_REFERENCE_PATH",
+    "LOCAL_WRITER_W3_REFERENCE_SHA256",
     "LOCAL_PRICING_SHA256",
     "LOCAL_WRITER_REFERENCE_PATH",
     "LOCAL_WRITER_REFERENCE_SHA256",

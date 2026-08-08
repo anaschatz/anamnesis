@@ -23,6 +23,10 @@ from anamnesis.local_experiment import (
     LOCAL_PRICING_SHA256,
     LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH,
     LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256,
+    LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_PATH,
+    LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256,
+    LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_PATH,
+    LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256,
     LocalExperimentManifest,
     load_ollama_artifact_pin,
     require_local_only_environment,
@@ -33,6 +37,7 @@ from anamnesis.local_experiment import (
 from anamnesis.local_preflight import (
     validate_local_preflight_artifact,
     validate_local_w2_preflight_artifact,
+    validate_local_w3_preflight_artifact,
 )
 from anamnesis.local_runtime import (
     LOCAL_DECISION_VERSION,
@@ -40,8 +45,11 @@ from anamnesis.local_runtime import (
     LOCAL_MODEL_PREFLIGHT_TASK_VERSION,
     LOCAL_MODEL_PREFLIGHT_W2_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION,
+    LOCAL_MODEL_PREFLIGHT_W3_PURPOSE,
+    LOCAL_MODEL_PREFLIGHT_W3_TASK_VERSION,
     LOCAL_OLLAMA_CONTEXT_LENGTH,
     LOCAL_SCENARIO_TASK_VERSION,
+    LOCAL_SCENARIO_W3_TASK_VERSION,
     LOCAL_ZERO_MODEL_COST,
     LocalSystemName,
     local_decision_prompt_contract,
@@ -49,16 +57,23 @@ from anamnesis.local_runtime import (
     local_memory_compiler_prompt_contract,
     local_memory_compiler_schema_contract,
     local_memory_compiler_w2_prompt_contract,
+    local_memory_compiler_w3_prompt_contract,
     local_model_preflight_sample,
     local_model_preflight_scorer,
     local_model_preflight_solver,
     local_model_preflight_w2_sample,
     local_model_preflight_w2_scorer,
     local_model_preflight_w2_solver,
+    local_model_preflight_w3_sample,
+    local_model_preflight_w3_scorer,
+    local_model_preflight_w3_solver,
     local_scenario_solver,
     local_system_config_sha256,
 )
-from anamnesis.local_wire import LOCAL_MEMORY_COMPILER_W2_VERSION
+from anamnesis.local_wire import (
+    LOCAL_MEMORY_COMPILER_W2_VERSION,
+    LOCAL_MEMORY_COMPILER_W3_VERSION,
+)
 from anamnesis.oracle import (
     ORACLE_ANNOTATION_POLICY,
     ORACLE_ARTIFACT_PURPOSE,
@@ -204,7 +219,24 @@ def _validated_local_manifest(
     preflight_path = _repo_artifact_path(manifest.model.preflight.path)
     if manifest.git_commit is None or manifest.model.pricing.sha256 is None:
         raise ValueError("frozen local manifest is missing git/pricing pins")
-    if manifest.phase == "writer_diagnostic_w2":
+    if manifest.phase == "writer_diagnostic_w3":
+        if manifest.preflight_fixture is None or manifest.preflight_protocol is None:
+            raise ValueError("frozen W3 manifest omitted preflight fixture/protocol")
+        fixture_path = _repo_artifact_path(manifest.preflight_fixture.path)
+        protocol_path = _repo_artifact_path(manifest.preflight_protocol.path)
+        validate_local_w3_preflight_artifact(
+            manifest.model.preflight.model_copy(update={"path": str(preflight_path)}),
+            fixture_artifact=manifest.preflight_fixture.model_copy(
+                update={"path": str(fixture_path)}
+            ),
+            protocol_artifact=manifest.preflight_protocol.model_copy(
+                update={"path": str(protocol_path)}
+            ),
+            expected_git_commit=manifest.git_commit,
+            expected_pricing_sha256=manifest.model.pricing.sha256,
+            seed=expected_seed,
+        )
+    elif manifest.phase == "writer_diagnostic_w2":
         if manifest.preflight_fixture is None:
             raise ValueError("frozen W2 manifest omitted preflight_fixture")
         fixture_path = _repo_artifact_path(manifest.preflight_fixture.path)
@@ -231,11 +263,17 @@ def _validated_local_manifest(
         "decision_schema_sha256": _sha256_text(local_decision_schema_contract()),
     }
     if "anamnesis" in manifest.systems:
+        compiler_prompt_contract_by_phase = {
+            "smoke": local_memory_compiler_prompt_contract,
+            "baseline": local_memory_compiler_prompt_contract,
+            "oracle_smoke": local_memory_compiler_prompt_contract,
+            "writer_diagnostic": local_memory_compiler_prompt_contract,
+            "writer_diagnostic_w2": local_memory_compiler_w2_prompt_contract,
+            "writer_diagnostic_w3": local_memory_compiler_w3_prompt_contract,
+        }
         expected_hashes.update(
             memory_compiler_prompt_sha256=_sha256_text(
-                local_memory_compiler_w2_prompt_contract()
-                if manifest.phase == "writer_diagnostic_w2"
-                else local_memory_compiler_prompt_contract()
+                compiler_prompt_contract_by_phase[manifest.phase]()
             ),
             memory_compiler_schema_sha256=_sha256_text(
                 local_memory_compiler_schema_contract()
@@ -245,6 +283,14 @@ def _validated_local_manifest(
         if getattr(manifest, field_name) != expected:
             raise ValueError(f"local manifest {field_name} differs from runtime")
 
+    compiler_variant_by_phase = {
+        "smoke": "w1",
+        "baseline": "w1",
+        "oracle_smoke": "w1",
+        "writer_diagnostic": "w1",
+        "writer_diagnostic_w2": "w2",
+        "writer_diagnostic_w3": "w3",
+    }
     expected_system_hashes = {
         name: local_system_config_sha256(
             system=name,  # type: ignore[arg-type]
@@ -262,8 +308,29 @@ def _validated_local_manifest(
                 and manifest.oracle_annotations is not None
                 else None
             ),
-            compiler_prompt_variant=(
-                "w2" if manifest.phase == "writer_diagnostic_w2" else "w1"
+            compiler_prompt_variant=compiler_variant_by_phase[manifest.phase],  # type: ignore[arg-type]
+            w3_preflight_fixture_sha256=(
+                manifest.preflight_fixture.sha256
+                if manifest.phase == "writer_diagnostic_w3"
+                and manifest.preflight_fixture is not None
+                else None
+            ),
+            w3_preflight_protocol_sha256=(
+                manifest.preflight_protocol.sha256
+                if manifest.phase == "writer_diagnostic_w3"
+                and manifest.preflight_protocol is not None
+                else None
+            ),
+            w3_dataset_sha256=(
+                manifest.dataset.sha256
+                if manifest.phase == "writer_diagnostic_w3"
+                else None
+            ),
+            w3_reference_sha256=(
+                manifest.writer_reference.sha256
+                if manifest.phase == "writer_diagnostic_w3"
+                and manifest.writer_reference is not None
+                else None
             ),
         )
         for name in manifest.systems
@@ -275,6 +342,15 @@ def _validated_local_manifest(
     scenarios = load_scenarios(dataset_path)
     if len(scenarios) != manifest.scenario_count:
         raise ValueError("local dataset count differs from the frozen manifest")
+    if manifest.phase == "writer_diagnostic_w3":
+        checkpoint_count = sum(len(scenario.events) for scenario in scenarios)
+        compiler_call_count = sum(
+            event.kind != "clock_tick"
+            for scenario in scenarios
+            for event in scenario.events
+        )
+        if checkpoint_count != 62 or compiler_call_count != 39:
+            raise ValueError("local W3 dataset must contain exactly 62/39 calls")
     manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
     return manifest, manifest_sha256, dataset_path
 
@@ -339,6 +415,46 @@ def local_model_preflight_w2(seed: int = 101) -> Task:
     )
 
 
+@task
+def local_model_preflight_w3(seed: int = 101) -> Task:
+    """Frozen nine-call W3 semantic gate; never a scenario evaluation."""
+
+    if seed != 101:
+        raise ValueError("local W3 preflight requires seed 101 exactly")
+    fixture_path = _repo_artifact_path(LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_PATH)
+    protocol_path = _repo_artifact_path(LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_PATH)
+    if hashlib.sha256(fixture_path.read_bytes()).hexdigest() != (
+        LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256
+    ):
+        raise ValueError("tracked W3 preflight fixture differs from its pin")
+    if hashlib.sha256(protocol_path.read_bytes()).hexdigest() != (
+        LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256
+    ):
+        raise ValueError("tracked W3 preflight protocol differs from its pin")
+    return Task(
+        dataset=[local_model_preflight_w3_sample()],
+        solver=local_model_preflight_w3_solver(str(fixture_path)),
+        scorer=local_model_preflight_w3_scorer(),
+        config=GenerateConfig(
+            temperature=0.0,
+            seed=seed,
+            cache=False,
+            max_retries=0,
+            max_connections=1,
+            adaptive_connections=False,
+        ),
+        version=LOCAL_MODEL_PREFLIGHT_W3_TASK_VERSION,
+        metadata={
+            "purpose": LOCAL_MODEL_PREFLIGHT_W3_PURPOSE,
+            "track": "local_zero_api_cost",
+            "hypothesis_test_eligible": False,
+            "pricing_config_sha256": ACTIVE_LOCAL_PRICING_SHA256,
+            "preflight_fixture_sha256": LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256,
+            "preflight_protocol_sha256": LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256,
+        },
+    )
+
+
 def _system_task(
     system: LocalSystemName,
     *,
@@ -379,14 +495,34 @@ def _system_task(
             raise ValueError("frozen oracle manifest omitted annotation SHA-256")
     elif oracle_annotations_path is not None:
         raise ValueError("oracle_annotations_path is only valid for the oracle task")
-    compiler_prompt_variant = "w2" if frozen.phase == "writer_diagnostic_w2" else "w1"
+    compiler_prompt_variant_by_phase = {
+        "smoke": "w1",
+        "baseline": "w1",
+        "oracle_smoke": "w1",
+        "writer_diagnostic": "w1",
+        "writer_diagnostic_w2": "w2",
+        "writer_diagnostic_w3": "w3",
+    }
+    compiler_prompt_variant = compiler_prompt_variant_by_phase[frozen.phase]
     w2_preflight_fixture_path: str | None = None
+    w3_preflight_fixture_path: str | None = None
     if frozen.phase == "writer_diagnostic_w2":
         if frozen.preflight_fixture is None:
             raise ValueError("frozen W2 manifest omitted preflight_fixture")
         w2_preflight_fixture_path = str(
             _repo_artifact_path(frozen.preflight_fixture.path)
         )
+    elif frozen.phase == "writer_diagnostic_w3":
+        if frozen.preflight_fixture is None or frozen.preflight_protocol is None:
+            raise ValueError("frozen W3 manifest omitted preflight fixture/protocol")
+        w3_preflight_fixture_path = str(
+            _repo_artifact_path(frozen.preflight_fixture.path)
+        )
+    task_version = (
+        LOCAL_SCENARIO_W3_TASK_VERSION
+        if frozen.phase == "writer_diagnostic_w3"
+        else LOCAL_SCENARIO_TASK_VERSION
+    )
     return Task(
         dataset=_scenario_dataset(
             dataset_path,
@@ -412,6 +548,24 @@ def _system_task(
             oracle_annotations_sha256=oracle_annotations_sha256,
             compiler_prompt_variant=compiler_prompt_variant,
             w2_preflight_fixture_path=w2_preflight_fixture_path,
+            w3_preflight_fixture_path=w3_preflight_fixture_path,
+            w3_preflight_protocol_sha256=(
+                frozen.preflight_protocol.sha256
+                if frozen.phase == "writer_diagnostic_w3"
+                and frozen.preflight_protocol is not None
+                else None
+            ),
+            w3_dataset_sha256=(
+                frozen.dataset.sha256
+                if frozen.phase == "writer_diagnostic_w3"
+                else None
+            ),
+            w3_reference_sha256=(
+                frozen.writer_reference.sha256
+                if frozen.phase == "writer_diagnostic_w3"
+                and frozen.writer_reference is not None
+                else None
+            ),
         ),
         scorer=scenario_run_scorer(),
         config=GenerateConfig(
@@ -422,7 +576,7 @@ def _system_task(
             max_connections=1,
             adaptive_connections=False,
         ),
-        version=LOCAL_SCENARIO_TASK_VERSION,
+        version=task_version,
         metadata={
             "track": frozen.track,
             "claim_scope": frozen.claim_scope,
@@ -440,6 +594,31 @@ def _system_task(
             "pricing_config_sha256": ACTIVE_LOCAL_PRICING_SHA256,
             "electricity_measured": False,
             "decision_prompt_version": LOCAL_DECISION_VERSION,
+            **(
+                {
+                    "compiler_mode": "llm",
+                    "memory_compiler_prompt_version": (
+                        LOCAL_MEMORY_COMPILER_W3_VERSION
+                    ),
+                    "preflight_fixture_sha256": (
+                        LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256
+                    ),
+                    "preflight_protocol_sha256": (
+                        LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256
+                    ),
+                    "setup_preflight_task": "local_model_preflight_w3",
+                    "setup_preflight_model_calls": 9,
+                    "setup_preflight_compiler_calls": 8,
+                    "setup_preflight_decision_calls": 1,
+                    "setup_preflight_usage_in_headline": False,
+                    "same_model_for_compiler_and_decision": True,
+                    "scenario_compiler_model_calls": 39,
+                    "dataset_checkpoint_count": 62,
+                    "intervention": "bundled-repair",
+                }
+                if frozen.phase == "writer_diagnostic_w3"
+                else {}
+            ),
             **(
                 {
                     "compiler_mode": "llm",
@@ -588,6 +767,23 @@ def local_anamnesis_writer_diagnostic_w2(
         manifest=manifest,
         ollama_models_dir=ollama_models_dir,
         required_phase="writer_diagnostic_w2",
+    )
+
+
+@task
+def local_anamnesis_writer_diagnostic_w3(
+    seed: int | None = None,
+    repetition: int = 1,
+    manifest: str | None = None,
+    ollama_models_dir: str | None = None,
+) -> Task:
+    return _system_task(
+        "anamnesis",
+        seed=seed,
+        repetition=repetition,
+        manifest=manifest,
+        ollama_models_dir=ollama_models_dir,
+        required_phase="writer_diagnostic_w3",
     )
 
 

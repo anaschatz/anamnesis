@@ -938,8 +938,8 @@ def _write_provenance(
 
 
 def writer_report_main(argv: Sequence[str] | None = None) -> int:
-    # The existing CLI remains the single entrypoint. Select the isolated W2
-    # reporter only from the manifest phase; task names or output paths cannot
+    # The existing CLI remains the single entrypoint. Select isolated W2/W3
+    # reporters only from the manifest phase; task names or output paths cannot
     # silently switch protocols.
     phase_probe = argparse.ArgumentParser(add_help=False)
     phase_probe.add_argument("--manifest", type=Path)
@@ -949,10 +949,12 @@ def writer_report_main(argv: Sequence[str] | None = None) -> int:
             raw_manifest = json.loads(phase_args.manifest.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             raw_manifest = None
-        if (
-            isinstance(raw_manifest, dict)
-            and raw_manifest.get("phase") == "writer_diagnostic_w2"
-        ):
+        phase = raw_manifest.get("phase") if isinstance(raw_manifest, dict) else None
+        if phase == "writer_diagnostic_w3":
+            from anamnesis.writer_report_w3 import writer_report_w3_main
+
+            return writer_report_w3_main(argv)
+        if phase == "writer_diagnostic_w2":
             from anamnesis.writer_report_w2 import writer_report_w2_main
 
             return writer_report_w2_main(argv)

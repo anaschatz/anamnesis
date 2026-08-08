@@ -50,11 +50,17 @@ from anamnesis.local_experiment import (
     LOCAL_MODEL_ID,
     LOCAL_OLLAMA_VERSION,
     LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256,
+    LOCAL_WRITER_W3_DATASET_SHA256,
+    LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256,
+    LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256,
+    LOCAL_WRITER_W3_REFERENCE_SHA256,
     require_local_only_environment,
 )
 from anamnesis.local_wire import (
     LOCAL_MEMORY_COMPILER_VERSION,
     LOCAL_MEMORY_COMPILER_W2_VERSION,
+    LOCAL_MEMORY_COMPILER_W3_ADDENDUM,
+    LOCAL_MEMORY_COMPILER_W3_VERSION,
     LocalAtTriggerWire,
     LocalConditionTransitionTriggerWire,
     LocalMemoryDeltaWire,
@@ -62,12 +68,16 @@ from anamnesis.local_wire import (
     LocalRecurringTriggerWire,
     build_local_memory_compiler_prompt,
     build_local_memory_compiler_w2_prompt,
+    build_local_memory_compiler_w3_prompt,
+    local_memory_compiler_w3_contract,
 )
 from anamnesis.memory import (
     AtTrigger,
     CompilerCall,
     CompilerRequest,
     CreateIntent,
+    SetFact,
+    UpdateIntent,
 )
 from anamnesis.oracle import (
     ORACLE_COMPILER_VERSION,
@@ -120,12 +130,18 @@ LOCAL_PREFLIGHT_METADATA_KEY = "anamnesis.local_preflight"
 LOCAL_PREFLIGHT_STORE_KEY = "anamnesis.local_preflight"
 LOCAL_PREFLIGHT_W2_METADATA_KEY = "anamnesis.local_preflight_w2"
 LOCAL_PREFLIGHT_W2_STORE_KEY = "anamnesis.local_preflight_w2"
+LOCAL_PREFLIGHT_W3_METADATA_KEY = "anamnesis.local_preflight_w3"
+LOCAL_PREFLIGHT_W3_STORE_KEY = "anamnesis.local_preflight_w3"
 LOCAL_MODEL_PREFLIGHT_TASK_VERSION = "local.0.1"
 LOCAL_MODEL_PREFLIGHT_PURPOSE = "local-model-semantic-preflight"
 LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION = "local.w2.0.1"
 LOCAL_MODEL_PREFLIGHT_W2_PURPOSE = "local-writer-w2-semantic-preflight"
 LOCAL_MODEL_PREFLIGHT_W2_SAMPLE_ID = "local-model-preflight-w2-v1"
+LOCAL_MODEL_PREFLIGHT_W3_TASK_VERSION = "local.w3.0.1"
+LOCAL_MODEL_PREFLIGHT_W3_PURPOSE = "local-writer-w3-semantic-preflight"
+LOCAL_MODEL_PREFLIGHT_W3_SAMPLE_ID = "local-model-preflight-w3-v1"
 LOCAL_SCENARIO_TASK_VERSION = "local.0.1"
+LOCAL_SCENARIO_W3_TASK_VERSION = "local.w3.0.1"
 LOCAL_ZERO_MODEL_COST = ModelCost(
     input=0.0,
     output=0.0,
@@ -334,6 +350,64 @@ class LocalModelPreflightW2Result(StrictModel):
         return total
 
 
+class LocalModelPreflightW3CaseResult(StrictModel):
+    """One ordered semantic result from the frozen W3 compatibility fixture."""
+
+    case_id: Literal["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "D1"]
+    role: Literal["compiler", "decision"]
+    parse_error: bool
+    semantic_valid: bool
+    usage: Usage
+    usage_complete: bool
+    cost_complete: bool
+    latency_ms: float = Field(ge=0)
+
+
+class LocalModelPreflightW3Result(StrictModel):
+    """Nine-call W3 semantic, accounting and local-residency gate result."""
+
+    model: Literal[LOCAL_OLLAMA_MODEL]
+    runtime: LocalOllamaRuntimeAttestation
+    loaded_model: LocalLoadedModelAttestation | None = None
+    same_model_for_compiler_and_decision: bool
+    cases: list[LocalModelPreflightW3CaseResult] = Field(min_length=9, max_length=9)
+    residency_probe_latency_ms: float = Field(ge=0)
+    fixture_sha256: Literal[LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256]
+    protocol_sha256: Literal[LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256]
+    passed: bool
+
+    @model_validator(mode="after")
+    def validate_case_order(self) -> Self:
+        identity = [(case.case_id, case.role) for case in self.cases]
+        expected = [
+            ("C1", "compiler"),
+            ("C2", "compiler"),
+            ("C3", "compiler"),
+            ("C4", "compiler"),
+            ("C5", "compiler"),
+            ("C6", "compiler"),
+            ("C7", "compiler"),
+            ("C8", "compiler"),
+            ("D1", "decision"),
+        ]
+        if identity != expected:
+            raise ValueError("W3 preflight cases must be ordered C1-C8,D1")
+        return self
+
+    @property
+    def setup_latency_ms(self) -> float:
+        return sum(case.latency_ms for case in self.cases) + (
+            self.residency_probe_latency_ms
+        )
+
+    @property
+    def usage(self) -> Usage:
+        total = Usage(cost_usd=0.0)
+        for case in self.cases:
+            total = total.plus(case.usage)
+        return total
+
+
 def build_local_decision_prompt(
     *,
     now: str,
@@ -436,6 +510,21 @@ def local_memory_compiler_w2_prompt_contract() -> str:
     )
 
 
+def local_memory_compiler_w3_prompt_contract() -> str:
+    """Render the static W3 compiler prompt sentinel used for hashing."""
+
+    sentinel = ObservableEvent(
+        id="<event-id>",
+        at=datetime.fromisoformat("2000-01-01T00:00:00+00:00"),
+        kind="user_message",
+        text="<event-text>",
+    )
+    return build_local_memory_compiler_w3_prompt(
+        event=sentinel,
+        active_state='{"facts":[],"intents":[]}',
+    )
+
+
 def local_memory_compiler_schema_contract() -> str:
     """Serialize the exact Inspect compiler response schema sent to Ollama."""
 
@@ -462,6 +551,16 @@ def local_memory_compiler_w2_transport_contract() -> str:
     return (
         f"{LOCAL_MEMORY_COMPILER_W2_VERSION}\n"
         f"{local_memory_compiler_w2_prompt_contract()}\n"
+        f"{local_memory_compiler_schema_contract()}"
+    )
+
+
+def local_memory_compiler_w3_transport_contract() -> str:
+    """Bind the W3 prompt to the unchanged Inspect compiler wire schema."""
+
+    return (
+        f"{LOCAL_MEMORY_COMPILER_W3_VERSION}\n"
+        f"{local_memory_compiler_w3_prompt_contract()}\n"
         f"{local_memory_compiler_schema_contract()}"
     )
 
@@ -1178,6 +1277,454 @@ async def run_local_model_preflight_w2(
     )
 
 
+_W3_COMPILER_CASE_IDENTITY = [
+    ("C1", "normalization_fact"),
+    ("C2", "bare_weekday_at"),
+    ("C3", "condition_transition_and"),
+    ("C4", "recurrence_iana_range"),
+    ("C5", "stable_id_trigger_update"),
+    ("C6", "full_action_template_update"),
+    ("C7", "complete_sparse_payload_including_zero"),
+    ("C8", "ambiguous_empty"),
+]
+
+
+def load_local_w3_preflight_protocol(path: str | Path) -> dict[str, Any]:
+    """Load the exact frozen W3 protocol without accepting alternate bytes."""
+
+    protocol_path = Path(path)
+    content = protocol_path.read_bytes()
+    if hashlib.sha256(content).hexdigest() != LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256:
+        raise ValueError("W3 preflight protocol hash differs from the frozen pin")
+    raw = json.loads(content)
+    if not isinstance(raw, dict):
+        raise ValueError("W3 preflight protocol must be a JSON object")
+    ordered = raw.get("preflight")
+    ordered = ordered.get("ordered_categories") if isinstance(ordered, dict) else None
+    if not isinstance(ordered, list):
+        raise ValueError("W3 preflight protocol omits ordered categories")
+    identity = [
+        (case.get("id"), case.get("role"), case.get("category"))
+        for case in ordered
+        if isinstance(case, dict)
+    ]
+    expected = [
+        (case_id, "compiler", category)
+        for case_id, category in _W3_COMPILER_CASE_IDENTITY
+    ]
+    expected.append(("D1", "decision", "no_action"))
+    if (
+        raw.get("protocol_id") != "local_writer_w3.protocol.v1"
+        or raw.get("phase") != "writer_diagnostic_w3"
+        or raw.get("hypothesis_test_eligible") is not False
+        or identity != expected
+    ):
+        raise ValueError("W3 preflight protocol identity differs from the pin")
+    return raw
+
+
+def _validate_local_w3_preflight_fixture(fixture: Mapping[str, Any]) -> None:
+    if set(fixture) != {
+        "schema_version",
+        "fixture_id",
+        "purpose",
+        "hypothesis_test_eligible",
+        "authorship",
+        "contracts",
+        "custodian_audit",
+        "compiler_cases",
+        "decision_cases",
+    }:
+        raise ValueError("W3 preflight fixture has an invalid top-level shape")
+    if (
+        fixture.get("schema_version") != 1
+        or fixture.get("fixture_id") != "local_writer_w3.v1"
+        or fixture.get("purpose") != "diagnostic"
+        or fixture.get("hypothesis_test_eligible") is not False
+    ):
+        raise ValueError("W3 preflight fixture identity differs from the protocol")
+    authorship = fixture.get("authorship")
+    if (
+        not isinstance(authorship, dict)
+        or authorship.get("protocol_id") != "local_writer_w3.protocol.v1"
+        or authorship.get("protocol_sha256")
+        != LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256
+        or authorship.get("model_boundary") != "case_input_only"
+    ):
+        raise ValueError("W3 preflight fixture authorship binding is invalid")
+    custodian = fixture.get("custodian_audit")
+    dataset = custodian.get("dataset") if isinstance(custodian, dict) else None
+    oracle = custodian.get("oracle") if isinstance(custodian, dict) else None
+    if (
+        not isinstance(custodian, dict)
+        or custodian.get("status") != "passed"
+        or not isinstance(dataset, dict)
+        or dataset.get("raw_sha256") != LOCAL_WRITER_W3_DATASET_SHA256
+        or not isinstance(oracle, dict)
+        or oracle.get("raw_sha256") != LOCAL_WRITER_W3_REFERENCE_SHA256
+        or custodian.get("model_boundary_unchanged") is not True
+    ):
+        raise ValueError("W3 preflight fixture custodian binding is invalid")
+    contracts = fixture.get("contracts")
+    if not isinstance(contracts, dict):
+        raise ValueError("W3 preflight fixture contracts are missing")
+    expected_contracts = {
+        "compiler": {
+            "prompt_version": LOCAL_MEMORY_COMPILER_W3_VERSION,
+            "addendum_sha256": hashlib.sha256(
+                LOCAL_MEMORY_COMPILER_W3_ADDENDUM.encode()
+            ).hexdigest(),
+            "prompt_sha256": hashlib.sha256(
+                local_memory_compiler_w3_prompt_contract().encode()
+            ).hexdigest(),
+            "local_wire_contract_sha256": hashlib.sha256(
+                local_memory_compiler_w3_contract().encode()
+            ).hexdigest(),
+            "local_wire_model_schema_sha256": (
+                "f0e0ab9c3aef10f9b99ca5055d1ee1f2e6d7f091be666ee95035040e564302ec"
+            ),
+            "inspect_response_schema_sha256": hashlib.sha256(
+                local_memory_compiler_schema_contract().encode()
+            ).hexdigest(),
+            "inspect_response_schema_unchanged_from_w2": True,
+        },
+        "decision": {
+            "prompt_version": LOCAL_DECISION_VERSION,
+            "prompt_sha256": hashlib.sha256(
+                local_decision_prompt_contract().encode()
+            ).hexdigest(),
+            "schema_sha256": hashlib.sha256(
+                local_decision_schema_contract().encode()
+            ).hexdigest(),
+            "unchanged_from_w2": True,
+        },
+    }
+    if contracts != expected_contracts:
+        raise ValueError("W3 preflight fixture contract hashes differ from runtime")
+    compiler_cases = fixture.get("compiler_cases")
+    decision_cases = fixture.get("decision_cases")
+    if not isinstance(compiler_cases, list) or not isinstance(decision_cases, list):
+        raise ValueError("W3 preflight fixture cases are missing")
+    compiler_identity = [
+        (case.get("id"), case.get("category"))
+        for case in compiler_cases
+        if isinstance(case, dict)
+    ]
+    decision_identity = [
+        (case.get("id"), case.get("category"))
+        for case in decision_cases
+        if isinstance(case, dict)
+    ]
+    if compiler_identity != _W3_COMPILER_CASE_IDENTITY:
+        raise ValueError("W3 preflight compiler cases must be ordered C1-C8")
+    if decision_identity != [("D1", "no_action")]:
+        raise ValueError("W3 preflight decision cases must contain only D1")
+    for case in [*compiler_cases, *decision_cases]:
+        if not isinstance(case, dict) or not isinstance(case.get("input"), dict):
+            raise ValueError("W3 preflight case input is invalid")
+        if not isinstance(case.get("acceptance"), dict):
+            raise ValueError("W3 preflight case acceptance is invalid")
+
+
+def load_local_w3_preflight_fixture(path: str | Path) -> dict[str, Any]:
+    """Load only the content-addressed W3 synthetic preflight fixture."""
+
+    fixture_path = Path(path)
+    content = fixture_path.read_bytes()
+    if hashlib.sha256(content).hexdigest() != LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256:
+        raise ValueError("W3 preflight fixture hash differs from the frozen pin")
+    raw = json.loads(content)
+    if not isinstance(raw, dict):
+        raise ValueError("W3 preflight fixture must be a JSON object")
+    _validate_local_w3_preflight_fixture(raw)
+    return raw
+
+
+def local_w3_preflight_prompts(fixture: Mapping[str, Any]) -> tuple[str, ...]:
+    """Render C1-C8,D1 from input fields only, never fixture acceptance data."""
+
+    _validate_local_w3_preflight_fixture(fixture)
+    compiler_cases = fixture["compiler_cases"]
+    decision_cases = fixture["decision_cases"]
+    assert isinstance(compiler_cases, list)
+    assert isinstance(decision_cases, list)
+    prompts: list[str] = []
+    for case in compiler_cases:
+        assert isinstance(case, dict)
+        case_input = case["input"]
+        assert isinstance(case_input, dict)
+        event = ObservableEvent.model_validate(case_input["event"])
+        active_state = case_input.get("active_state")
+        if not isinstance(active_state, str):
+            raise ValueError("W3 compiler preflight active_state must be a string")
+        prompts.append(
+            build_local_memory_compiler_w3_prompt(
+                event=event,
+                active_state=active_state,
+            )
+        )
+    decision_case = decision_cases[0]
+    assert isinstance(decision_case, dict)
+    decision_input = decision_case["input"]
+    assert isinstance(decision_input, dict)
+    raw_events = decision_input.get("context_events")
+    raw_history = decision_input.get("decision_history")
+    if not isinstance(raw_events, list) or not isinstance(raw_history, list):
+        raise ValueError("W3 decision preflight input is invalid")
+    prompts.append(
+        build_local_decision_prompt(
+            now=str(decision_input.get("now")),
+            current_event_id=str(decision_input.get("current_event_id")),
+            context_events=[
+                ObservableEvent.model_validate(event) for event in raw_events
+            ],
+            decision_history=raw_history,
+            memory_view=MemoryView.model_validate(decision_input.get("memory_view")),
+        )
+    )
+    return tuple(prompts)
+
+
+def _same_json(left: object, right: object) -> bool:
+    return json.dumps(left, sort_keys=True, separators=(",", ":")) == json.dumps(
+        right,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _w3_create_semantic_valid(
+    mutation: CreateIntent,
+    acceptance: Mapping[str, Any],
+) -> bool:
+    raw = mutation.model_dump(mode="json")
+    actual_trigger = raw.get("trigger")
+    expected_trigger = acceptance.get("trigger")
+    if not isinstance(actual_trigger, dict) or not isinstance(expected_trigger, dict):
+        return False
+    if acceptance.get("weekdays_match") == "set":
+        actual_weekdays = actual_trigger.pop("weekdays", None)
+        expected_weekdays = expected_trigger.get("weekdays")
+        expected_trigger = dict(expected_trigger)
+        expected_trigger.pop("weekdays", None)
+        if (
+            not isinstance(actual_weekdays, list)
+            or not isinstance(expected_weekdays, list)
+            or set(actual_weekdays) != set(expected_weekdays)
+            or len(actual_weekdays) != len(set(actual_weekdays))
+        ):
+            return False
+    if not _same_json(actual_trigger, expected_trigger):
+        return False
+    actual_conditions = raw.get("required_conditions")
+    expected_conditions = acceptance.get("required_conditions")
+    if acceptance.get("required_conditions_match") == "canonical_multiset":
+        if not isinstance(actual_conditions, list) or not isinstance(
+            expected_conditions, list
+        ):
+            return False
+        actual_conditions = sorted(
+            json.dumps(item, sort_keys=True, separators=(",", ":"))
+            for item in actual_conditions
+        )
+        expected_conditions = sorted(
+            json.dumps(item, sort_keys=True, separators=(",", ":"))
+            for item in expected_conditions
+        )
+    action_template = raw.get("action_template")
+    expected_action = acceptance.get("action_template")
+    return bool(
+        raw.get("op") == "create_intent"
+        and isinstance(raw.get("intent_id"), str)
+        and raw.get("intent_id")
+        and _same_json(actual_conditions, expected_conditions)
+        and _same_json(raw.get("blockers"), acceptance.get("blockers"))
+        and isinstance(action_template, dict)
+        and isinstance(expected_action, dict)
+        and action_template.get("kind") == expected_action.get("kind")
+        and _same_json(
+            action_template.get("payload"),
+            expected_action.get("payload"),
+        )
+        and isinstance(action_template.get("summary"), str)
+        and action_template.get("summary")
+    )
+
+
+def _w3_compiler_semantic_valid(
+    completion: str,
+    case: Mapping[str, Any],
+) -> tuple[bool, bool]:
+    try:
+        delta = LocalMemoryDeltaWire.model_validate_json(completion).to_domain()
+    except (ValidationError, ValueError):
+        return True, False
+    acceptance = case.get("acceptance")
+    if not isinstance(acceptance, dict):
+        return False, False
+    mutation_type = acceptance.get("mutation_type")
+    if mutation_type == "empty_delta":
+        return False, not delta.mutations
+    if len(delta.mutations) != acceptance.get("mutation_count"):
+        return False, False
+    mutation = delta.mutations[0]
+    if mutation_type == "set_fact":
+        if not isinstance(mutation, SetFact):
+            return False, False
+        raw = mutation.model_dump(mode="json")
+        return False, bool(
+            raw.get("op") == "set_fact"
+            and _same_json(raw.get("key"), acceptance.get("key"))
+            and _same_json(raw.get("value"), acceptance.get("value"))
+            and _same_json(raw.get("unit"), acceptance.get("unit"))
+        )
+    if mutation_type == "create_intent":
+        return False, isinstance(mutation, CreateIntent) and (
+            _w3_create_semantic_valid(mutation, acceptance)
+        )
+    if mutation_type == "update_intent":
+        if not isinstance(mutation, UpdateIntent):
+            return False, False
+        raw = mutation.model_dump(mode="json", exclude_none=True)
+        changed_fields = acceptance.get("changed_fields")
+        if not isinstance(changed_fields, list):
+            return False, False
+        expected_keys = {"op", "intent_id", *changed_fields}
+        return False, bool(
+            set(raw) == expected_keys
+            and raw.get("op") == "update_intent"
+            and raw.get("intent_id") == acceptance.get("intent_id")
+            and all(
+                _same_json(raw.get(field), acceptance.get(field))
+                for field in changed_fields
+            )
+        )
+    return False, False
+
+
+async def run_local_model_preflight_w3(
+    model: LocalInspectDecisionModel,
+    *,
+    fixture: Mapping[str, Any],
+    residency_probe: Callable[[], LocalLoadedModelAttestation] = (
+        probe_loaded_local_model
+    ),
+) -> LocalModelPreflightW3Result:
+    """Run frozen C1-C8,D1 exactly once each, without retry or repair."""
+
+    _validate_local_w3_preflight_fixture(fixture)
+    compiler_cases = fixture["compiler_cases"]
+    decision_cases = fixture["decision_cases"]
+    assert isinstance(compiler_cases, list)
+    assert isinstance(decision_cases, list)
+    compiler = LocalInspectMemoryCompiler(
+        model,
+        prompt_builder=build_local_memory_compiler_w3_prompt,
+    )
+    results: list[LocalModelPreflightW3CaseResult] = []
+    for case in compiler_cases:
+        assert isinstance(case, dict)
+        case_input = case["input"]
+        assert isinstance(case_input, dict)
+        event = ObservableEvent.model_validate(case_input["event"])
+        active_state = case_input.get("active_state")
+        if not isinstance(active_state, str):
+            raise ValueError("W3 compiler preflight active_state must be a string")
+        call = await compiler.compile(
+            CompilerRequest(event=event, active_state=active_state)
+        )
+        parse_error, semantic_valid = _w3_compiler_semantic_valid(
+            call.raw_completion,
+            case,
+        )
+        if parse_error != call.parse_error:
+            raise ValueError("W3 compiler parse accounting is inconsistent")
+        results.append(
+            LocalModelPreflightW3CaseResult(
+                case_id=case["id"],
+                role="compiler",
+                parse_error=parse_error,
+                semantic_valid=semantic_valid,
+                usage=call.usage,
+                usage_complete=call.usage_complete,
+                cost_complete=call.cost_complete,
+                latency_ms=call.latency_ms,
+            )
+        )
+
+    decision_case = decision_cases[0]
+    assert isinstance(decision_case, dict)
+    decision_input = decision_case["input"]
+    assert isinstance(decision_input, dict)
+    raw_events = decision_input.get("context_events")
+    raw_history = decision_input.get("decision_history")
+    if not isinstance(raw_events, list) or not isinstance(raw_history, list):
+        raise ValueError("W3 decision preflight input is invalid")
+    context_events = [ObservableEvent.model_validate(event) for event in raw_events]
+    decision_call = await model.decide(
+        DecisionRequest(
+            event=context_events[-1],
+            prompt=build_local_decision_prompt(
+                now=str(decision_input.get("now")),
+                current_event_id=str(decision_input.get("current_event_id")),
+                context_events=context_events,
+                decision_history=raw_history,
+                memory_view=MemoryView.model_validate(
+                    decision_input.get("memory_view")
+                ),
+            ),
+        )
+    )
+    parse_error, semantic_valid = _w2_decision_semantic_valid(
+        decision_call.raw_completion
+    )
+    if parse_error != decision_call.parse_error:
+        raise ValueError("W3 decision parse accounting is inconsistent")
+    results.append(
+        LocalModelPreflightW3CaseResult(
+            case_id="D1",
+            role="decision",
+            parse_error=parse_error,
+            semantic_valid=semantic_valid,
+            usage=decision_call.usage,
+            usage_complete=decision_call.usage_complete,
+            cost_complete=decision_call.cost_complete,
+            latency_ms=decision_call.latency_ms,
+        )
+    )
+
+    probe_started = perf_counter()
+    try:
+        loaded_model = await asyncio.to_thread(residency_probe)
+    except (OSError, ValueError, ValidationError, json.JSONDecodeError):
+        loaded_model = None
+    probe_latency_ms = max(0.0, (perf_counter() - probe_started) * 1000)
+    same_model = compiler.name == model.name and compiler._model is model
+    passed = bool(
+        loaded_model is not None
+        and same_model
+        and all(
+            not result.parse_error
+            and result.semantic_valid
+            and result.usage_complete
+            and result.cost_complete
+            and result.usage.cost_usd == 0.0
+            for result in results
+        )
+    )
+    return LocalModelPreflightW3Result(
+        model=LOCAL_OLLAMA_MODEL,
+        runtime=model.runtime_attestation,
+        loaded_model=loaded_model,
+        same_model_for_compiler_and_decision=same_model,
+        cases=results,
+        residency_probe_latency_ms=probe_latency_ms,
+        fixture_sha256=LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256,
+        protocol_sha256=LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256,
+        passed=passed,
+    )
+
+
 class _TaskLocalPreflight:
     """Concurrency-safe live gate performed before any scenario model call."""
 
@@ -1229,6 +1776,34 @@ class _TaskLocalW2Preflight:
         return self._result, False
 
 
+class _TaskLocalW3Preflight:
+    """Concurrency-safe nine-call W3 gate run once per scenario task."""
+
+    def __init__(self, fixture: Mapping[str, Any]) -> None:
+        _validate_local_w3_preflight_fixture(fixture)
+        self._fixture = fixture
+        self._lock = asyncio.Lock()
+        self._result: LocalModelPreflightW3Result | None = None
+
+    async def ensure(
+        self,
+        model: LocalInspectDecisionModel,
+    ) -> tuple[LocalModelPreflightW3Result, bool]:
+        if self._result is not None:
+            return self._result, False
+        async with self._lock:
+            if self._result is None:
+                result = await run_local_model_preflight_w3(
+                    model,
+                    fixture=self._fixture,
+                )
+                if not result.passed:
+                    raise ValueError("live local W3 semantic preflight failed")
+                self._result = result
+                return result, True
+        return self._result, False
+
+
 def local_model_preflight_sample() -> Sample:
     """Return one synthetic local compatibility case, never benchmark data."""
 
@@ -1245,6 +1820,16 @@ def local_model_preflight_w2_sample() -> Sample:
     return Sample(
         id=LOCAL_MODEL_PREFLIGHT_W2_SAMPLE_ID,
         input="Check the frozen local W2 compiler and decision protocol.",
+        target="pass",
+    )
+
+
+def local_model_preflight_w3_sample() -> Sample:
+    """Return one synthetic nine-call W3 compatibility sample."""
+
+    return Sample(
+        id=LOCAL_MODEL_PREFLIGHT_W3_SAMPLE_ID,
+        input="Check the frozen local W3 compiler and decision protocol.",
         target="pass",
     )
 
@@ -1284,6 +1869,28 @@ def local_model_preflight_w2_solver(
         serialized = result.model_dump(mode="json")
         state.metadata[LOCAL_PREFLIGHT_W2_METADATA_KEY] = serialized
         state.store.set(LOCAL_PREFLIGHT_W2_STORE_KEY, serialized)
+        state.output = ModelOutput.from_content(
+            model=model.name,
+            content=result.model_dump_json(),
+        )
+        return state
+
+    return solve
+
+
+@solver
+def local_model_preflight_w3_solver(fixture_path: str) -> Solver:
+    """Standalone frozen W3 gate that exposes failure without repair."""
+
+    fixture = load_local_w3_preflight_fixture(fixture_path)
+
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        model = LocalInspectDecisionModel(state, generate)
+        result = await run_local_model_preflight_w3(model, fixture=fixture)
+        state = model.state
+        serialized = result.model_dump(mode="json")
+        state.metadata[LOCAL_PREFLIGHT_W3_METADATA_KEY] = serialized
+        state.store.set(LOCAL_PREFLIGHT_W3_STORE_KEY, serialized)
         state.output = ModelOutput.from_content(
             model=model.name,
             content=result.model_dump_json(),
@@ -1335,6 +1942,27 @@ def local_model_preflight_w2_scorer() -> Scorer:
     return score
 
 
+@scorer(metrics=[])
+def local_model_preflight_w3_scorer() -> Scorer:
+    """Score only frozen W3 compatibility, never scenario quality."""
+
+    async def score(state: TaskState, target: Target) -> Score:
+        result = LocalModelPreflightW3Result.model_validate_json(
+            state.output.completion
+        )
+        return Score(
+            value=1 if result.passed else 0,
+            answer=result.model,
+            explanation=(
+                "local W3 C1-C8,D1 semantics, residency and zero-cost accounting passed"
+                if result.passed
+                else "local model failed one or more frozen W3 preflight checks"
+            ),
+        )
+
+    return score
+
+
 def local_system_config_sha256(
     *,
     system: LocalSystemName,
@@ -1345,7 +1973,11 @@ def local_system_config_sha256(
     embedding_artifact_sha256: str | None = None,
     pricing_config_sha256: str | None = None,
     oracle_annotations_sha256: str | None = None,
-    compiler_prompt_variant: Literal["w1", "w2"] = "w1",
+    compiler_prompt_variant: Literal["w1", "w2", "w3"] = "w1",
+    w3_preflight_fixture_sha256: str | None = None,
+    w3_preflight_protocol_sha256: str | None = None,
+    w3_dataset_sha256: str | None = None,
+    w3_reference_sha256: str | None = None,
 ) -> str:
     """Fingerprint all local knobs that can change a diagnostic result."""
 
@@ -1382,16 +2014,52 @@ def local_system_config_sha256(
     if system in {"anamnesis", ORACLE_SYSTEM_NAME}:
         payload["deterministic_memory"] = anamnesis_runtime_contract()
     if system == "anamnesis":
-        compiler_contract = (
-            local_memory_compiler_transport_contract()
-            if compiler_prompt_variant == "w1"
-            else local_memory_compiler_w2_transport_contract()
-        )
+        compiler_contract = {
+            "w1": local_memory_compiler_transport_contract,
+            "w2": local_memory_compiler_w2_transport_contract,
+            "w3": local_memory_compiler_w3_transport_contract,
+        }[compiler_prompt_variant]()
         payload["memory_compiler_sha256"] = hashlib.sha256(
             compiler_contract.encode()
         ).hexdigest()
+        w3_pins = {
+            "preflight_fixture_sha256": w3_preflight_fixture_sha256,
+            "preflight_protocol_sha256": w3_preflight_protocol_sha256,
+            "dataset_sha256": w3_dataset_sha256,
+            "reference_sha256": w3_reference_sha256,
+        }
+        if compiler_prompt_variant == "w3":
+            expected_w3_pins = {
+                "preflight_fixture_sha256": (LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256),
+                "preflight_protocol_sha256": (
+                    LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256
+                ),
+                "dataset_sha256": LOCAL_WRITER_W3_DATASET_SHA256,
+                "reference_sha256": LOCAL_WRITER_W3_REFERENCE_SHA256,
+            }
+            if w3_pins != expected_w3_pins:
+                raise ValueError("W3 system hash requires all exact frozen W3 pins")
+            payload["writer_w3_protocol"] = {
+                **w3_pins,
+                "intervention": "bundled-repair",
+                "setup_policy": "frozen_w3_semantic_gate_c1_to_c8_d1",
+                "scenario_compiler_calls": 39,
+                "scenario_checkpoints": 62,
+            }
+        elif any(value is not None for value in w3_pins.values()):
+            raise ValueError("W3 pins require compiler_prompt_variant=w3")
     elif compiler_prompt_variant != "w1":
-        raise ValueError("compiler_prompt_variant=w2 requires system=anamnesis")
+        raise ValueError("compiler_prompt_variant=w2/w3 requires system=anamnesis")
+    elif any(
+        value is not None
+        for value in (
+            w3_preflight_fixture_sha256,
+            w3_preflight_protocol_sha256,
+            w3_dataset_sha256,
+            w3_reference_sha256,
+        )
+    ):
+        raise ValueError("W3 pins require system=anamnesis")
     if system == ORACLE_SYSTEM_NAME:
         if oracle_annotations_sha256 is None or (
             len(oracle_annotations_sha256) != 64
@@ -1465,8 +2133,12 @@ def local_scenario_solver(
     pricing_config_sha256: str | None = None,
     oracle_annotations_path: str | None = None,
     oracle_annotations_sha256: str | None = None,
-    compiler_prompt_variant: Literal["w1", "w2"] = "w1",
+    compiler_prompt_variant: Literal["w1", "w2", "w3"] = "w1",
     w2_preflight_fixture_path: str | None = None,
+    w3_preflight_fixture_path: str | None = None,
+    w3_preflight_protocol_sha256: str | None = None,
+    w3_dataset_sha256: str | None = None,
+    w3_reference_sha256: str | None = None,
 ) -> Solver:
     """Run one local diagnostic system after a live semantic preflight."""
 
@@ -1491,10 +2163,56 @@ def local_scenario_solver(
         if not fixture_path.is_absolute() or not fixture_path.is_file():
             raise ValueError("W2 preflight fixture path must be an absolute file")
         w2_fixture = load_local_w2_preflight_fixture(fixture_path)
-    else:
+        if any(
+            value is not None
+            for value in (
+                w3_preflight_fixture_path,
+                w3_preflight_protocol_sha256,
+                w3_dataset_sha256,
+                w3_reference_sha256,
+            )
+        ):
+            raise ValueError("W3 inputs are invalid for the W2 compiler")
+        w3_fixture = None
+    elif compiler_prompt_variant == "w3":
+        if system != "anamnesis":
+            raise ValueError("W3 compiler prompt requires system=anamnesis")
         if w2_preflight_fixture_path is not None:
-            raise ValueError("W2 preflight fixture is invalid for the W1 compiler")
+            raise ValueError("W2 preflight fixture is invalid for the W3 compiler")
+        if w3_preflight_fixture_path is None:
+            raise ValueError("W3 compiler prompt requires its frozen fixture")
+        fixture_path = Path(w3_preflight_fixture_path)
+        if not fixture_path.is_absolute() or not fixture_path.is_file():
+            raise ValueError("W3 preflight fixture path must be an absolute file")
+        w3_fixture = load_local_w3_preflight_fixture(fixture_path)
+        if {
+            "protocol": w3_preflight_protocol_sha256,
+            "dataset": w3_dataset_sha256,
+            "reference": w3_reference_sha256,
+        } != {
+            "protocol": LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256,
+            "dataset": LOCAL_WRITER_W3_DATASET_SHA256,
+            "reference": LOCAL_WRITER_W3_REFERENCE_SHA256,
+        }:
+            raise ValueError("W3 compiler prompt requires all exact frozen W3 pins")
         w2_fixture = None
+    else:
+        if (
+            w2_preflight_fixture_path is not None
+            or w3_preflight_fixture_path is not None
+        ):
+            raise ValueError("W2/W3 preflight fixture is invalid for the W1 compiler")
+        if any(
+            value is not None
+            for value in (
+                w3_preflight_protocol_sha256,
+                w3_dataset_sha256,
+                w3_reference_sha256,
+            )
+        ):
+            raise ValueError("W3 pins are invalid for the W1 compiler")
+        w2_fixture = None
+        w3_fixture = None
 
     shared_vectorizer: Vectorizer | None = None
     if system == "vector_rag":
@@ -1510,19 +2228,26 @@ def local_scenario_solver(
     task_w2_preflight = (
         _TaskLocalW2Preflight(w2_fixture) if w2_fixture is not None else None
     )
+    task_w3_preflight = (
+        _TaskLocalW3Preflight(w3_fixture) if w3_fixture is not None else None
+    )
 
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         decision_model = LocalInspectDecisionModel(state, generate)
         if decision_model.name != expected_model:
             raise ValueError("active model differs from the frozen local manifest")
-        if task_w2_preflight is None:
-            preflight, performed_here = await task_preflight.ensure(decision_model)
-            preflight_metadata_key = LOCAL_PREFLIGHT_METADATA_KEY
-            preflight_store_key = LOCAL_PREFLIGHT_STORE_KEY
-        else:
+        if task_w3_preflight is not None:
+            preflight, performed_here = await task_w3_preflight.ensure(decision_model)
+            preflight_metadata_key = LOCAL_PREFLIGHT_W3_METADATA_KEY
+            preflight_store_key = LOCAL_PREFLIGHT_W3_STORE_KEY
+        elif task_w2_preflight is not None:
             preflight, performed_here = await task_w2_preflight.ensure(decision_model)
             preflight_metadata_key = LOCAL_PREFLIGHT_W2_METADATA_KEY
             preflight_store_key = LOCAL_PREFLIGHT_W2_STORE_KEY
+        else:
+            preflight, performed_here = await task_preflight.ensure(decision_model)
+            preflight_metadata_key = LOCAL_PREFLIGHT_METADATA_KEY
+            preflight_store_key = LOCAL_PREFLIGHT_STORE_KEY
         state = decision_model.state
         serialized_preflight = preflight.model_dump(mode="json")
         state.metadata[preflight_metadata_key] = serialized_preflight
@@ -1542,14 +2267,15 @@ def local_scenario_solver(
                 )
         oracle_compiler: OracleCompiler | None = None
         if system == "anamnesis":
+            prompt_builder = {
+                "w1": build_local_memory_compiler_prompt,
+                "w2": build_local_memory_compiler_w2_prompt,
+                "w3": build_local_memory_compiler_w3_prompt,
+            }[compiler_prompt_variant]
             strategy = AnamnesisMemoryStrategy(
                 compiler=LocalInspectMemoryCompiler(
                     decision_model,
-                    prompt_builder=(
-                        build_local_memory_compiler_prompt
-                        if compiler_prompt_variant == "w1"
-                        else build_local_memory_compiler_w2_prompt
-                    ),
+                    prompt_builder=prompt_builder,
                 )
             )
         elif system == ORACLE_SYSTEM_NAME:
@@ -1583,6 +2309,14 @@ def local_scenario_solver(
             pricing_config_sha256=pricing_config_sha256,
             oracle_annotations_sha256=oracle_annotations_sha256,
             compiler_prompt_variant=compiler_prompt_variant,
+            w3_preflight_fixture_sha256=(
+                LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256
+                if w3_fixture is not None
+                else None
+            ),
+            w3_preflight_protocol_sha256=w3_preflight_protocol_sha256,
+            w3_dataset_sha256=w3_dataset_sha256,
+            w3_reference_sha256=w3_reference_sha256,
         )
         if (
             expected_system_config_sha256 is not None
