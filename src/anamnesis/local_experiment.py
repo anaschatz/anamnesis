@@ -20,9 +20,19 @@ from anamnesis.oracle import ORACLE_SYSTEM_NAME
 from anamnesis.schema import StrictModel
 
 LOCAL_MODEL_ID = "ollama/qwen3:4b-instruct"
+LOCAL_W3_M2_MODEL_ID = "ollama/qwen3.5:9b-q4_K_M"
 LOCAL_BASE_URL = "http://127.0.0.1:11434/v1"
 LOCAL_MODEL_ARTIFACT_PATH = "eval/ollama_qwen3_4b_instruct.pin.json"
+LOCAL_W3_M2_MODEL_ARTIFACT_PATH = "eval/ollama_qwen3_5_9b_q4_k_m.pin.json"
 LOCAL_PRICING_PATH = "eval/local_model_costs.json"
+LOCAL_W3_M2_PRICING_PATH = "eval/local_model_costs_w3_m2.json"
+LOCAL_W3_M2_PRICING_SHA256 = (
+    "74f7321226f6fc71d9c8c88551653d8507d1a22a22ea4127226c91a5ce06267c"
+)
+LOCAL_W3_M2_PROTOCOL_PATH = "eval/preflight/local_writer_w3_m2.protocol.v1.json"
+LOCAL_W3_M2_PROTOCOL_SHA256 = (
+    "1b563651b0b95a9a258082c1016dbc997b4da53b3573b24be54dcac30cb82d0e"
+)
 LOCAL_PRICING_SHA256 = (
     "c185e2fad06d6bd2abaaf0be81a1720fc245555fa2a477c1b1bea558b28c2f74"
 )
@@ -89,11 +99,16 @@ class OllamaArtifactPin(StrictModel):
     @model_validator(mode="after")
     def validate_blob_set(self) -> Self:
         roles = [blob.role for blob in self.blobs]
-        expected = {"config", "model", "template", "license", "params"}
-        if set(roles) != expected or len(roles) != len(expected):
+        required = {"config", "model", "license", "params"}
+        allowed = required | {"template"}
+        if (
+            not required.issubset(roles)
+            or not set(roles).issubset(allowed)
+            or len(roles) != len(set(roles))
+        ):
             raise ValueError(
-                "Ollama artifact must pin config, model, template, license, "
-                "and params exactly once"
+                "Ollama artifact must pin config, model, license, and params "
+                "exactly once, with at most one template"
             )
         digests = [blob.sha256 for blob in self.blobs]
         if len(digests) != len(set(digests)):
@@ -719,6 +734,12 @@ __all__ = [
     "LOCAL_BASE_URL",
     "LOCAL_MODEL_ARTIFACT_PATH",
     "LOCAL_MODEL_ID",
+    "LOCAL_W3_M2_MODEL_ARTIFACT_PATH",
+    "LOCAL_W3_M2_MODEL_ID",
+    "LOCAL_W3_M2_PRICING_PATH",
+    "LOCAL_W3_M2_PRICING_SHA256",
+    "LOCAL_W3_M2_PROTOCOL_PATH",
+    "LOCAL_W3_M2_PROTOCOL_SHA256",
     "LOCAL_OLLAMA_VERSION",
     "LOCAL_PRICING_PATH",
     "LOCAL_WRITER_W2_DATASET_PATH",

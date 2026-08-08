@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from anamnesis.experiment import ArtifactPin
 from anamnesis.local_experiment import (
+    LOCAL_W3_M2_PROTOCOL_SHA256,
     LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256,
     LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256,
     LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256,
@@ -26,12 +27,17 @@ from anamnesis.local_runtime import (
     LOCAL_MODEL_PREFLIGHT_W2_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_W2_SAMPLE_ID,
     LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_PURPOSE,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_SAMPLE_ID,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_TASK_VERSION,
     LOCAL_MODEL_PREFLIGHT_W3_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_W3_SAMPLE_ID,
     LOCAL_MODEL_PREFLIGHT_W3_TASK_VERSION,
     LOCAL_OLLAMA_BASE_URL,
     LOCAL_OLLAMA_MODEL,
     LOCAL_OLLAMA_SERVICE_MODEL,
+    LOCAL_W3_M2_OLLAMA_MODEL,
+    LOCAL_W3_M2_OLLAMA_SERVICE_MODEL,
     LocalDecisionWire,
     LocalModelPreflightResult,
     LocalModelPreflightW2Result,
@@ -99,8 +105,10 @@ def _validate_local_model_event(
     prompt: str,
     schema: ResponseSchema,
     seed: int,
+    expected_model: str = LOCAL_OLLAMA_MODEL,
+    expected_service_model: str = LOCAL_OLLAMA_SERVICE_MODEL,
 ) -> None:
-    if event.model != LOCAL_OLLAMA_MODEL:
+    if event.model != expected_model:
         raise ValueError("preflight model event differs from the pinned local model")
     if (
         event.cache is not None
@@ -109,7 +117,7 @@ def _validate_local_model_event(
         or event.output.error is not None
     ):
         raise ValueError("local model event was cached, retried, or failed")
-    if event.output.model not in {LOCAL_OLLAMA_MODEL, LOCAL_OLLAMA_SERVICE_MODEL}:
+    if event.output.model not in {expected_model, expected_service_model}:
         raise ValueError("local response model differs from the pinned model")
     if event.output.usage is None or event.output.usage.input_tokens <= 0:
         raise ValueError("local model event is missing positive input-token usage")
@@ -139,7 +147,7 @@ def _validate_local_model_event(
     if call is None or call.error:
         raise ValueError("local model event is missing a successful raw API call")
     expected_params = openai_completion_params(
-        LOCAL_OLLAMA_SERVICE_MODEL,
+        expected_service_model,
         event.config,
         tools=False,
     )
@@ -168,8 +176,8 @@ def _validate_local_model_event(
         raise ValueError("raw local request contains unpinned headers")
     response = call.response
     if not isinstance(response, dict) or response.get("model") not in {
-        LOCAL_OLLAMA_MODEL,
-        LOCAL_OLLAMA_SERVICE_MODEL,
+        expected_model,
+        expected_service_model,
     }:
         raise ValueError("raw local response model differs from the pin")
 
@@ -495,6 +503,8 @@ def validate_local_w3_preflight_model_events(
     fixture: Mapping[str, Any],
     result: LocalModelPreflightW3Result,
     seed: int = 101,
+    expected_model: str = LOCAL_OLLAMA_MODEL,
+    expected_service_model: str = LOCAL_OLLAMA_SERVICE_MODEL,
 ) -> Usage:
     """Validate exactly C1-C8,D1 and return aggregate setup usage."""
 
@@ -530,8 +540,10 @@ def validate_local_w3_preflight_model_events(
         _validate_local_model_event(
             event,
             prompt=prompts[index],
-            schema=_local_memory_delta_schema(LOCAL_OLLAMA_MODEL),
+            schema=_local_memory_delta_schema(expected_model),
             seed=seed,
+            expected_model=expected_model,
+            expected_service_model=expected_service_model,
         )
         usage = _local_usage_from_output(event.output)
         if usage.input_tokens <= 0 or usage.output_tokens <= 0:
@@ -553,8 +565,10 @@ def validate_local_w3_preflight_model_events(
     _validate_local_model_event(
         decision_event,
         prompt=prompts[8],
-        schema=_local_decision_schema(LOCAL_OLLAMA_MODEL),
+        schema=_local_decision_schema(expected_model),
         seed=seed,
+        expected_model=expected_model,
+        expected_service_model=expected_service_model,
     )
     decision_usage = _local_usage_from_output(decision_event.output)
     if decision_usage.input_tokens <= 0 or decision_usage.output_tokens <= 0:
@@ -582,6 +596,14 @@ def validate_local_w3_preflight_log(
     expected_git_commit: str,
     expected_pricing_sha256: str,
     seed: int = 101,
+    expected_model: str = LOCAL_OLLAMA_MODEL,
+    expected_service_model: str = LOCAL_OLLAMA_SERVICE_MODEL,
+    expected_task: str = "local_model_preflight_w3",
+    expected_task_version: str = LOCAL_MODEL_PREFLIGHT_W3_TASK_VERSION,
+    expected_purpose: str = LOCAL_MODEL_PREFLIGHT_W3_PURPOSE,
+    expected_sample_id: str = LOCAL_MODEL_PREFLIGHT_W3_SAMPLE_ID,
+    expected_store_key: str = "anamnesis.local_preflight_w3",
+    expected_metadata_extra: Mapping[str, Any] | None = None,
 ) -> LocalModelPreflightW3Result:
     """Validate the exact nine-call frozen W3 standalone preflight log."""
 
@@ -589,21 +611,23 @@ def validate_local_w3_preflight_log(
         raise ValueError("local W3 preflight log is not a successful evaluation")
     spec = log.eval
     expected_metadata = {
-        "purpose": LOCAL_MODEL_PREFLIGHT_W3_PURPOSE,
+        "purpose": expected_purpose,
         "track": "local_zero_api_cost",
         "hypothesis_test_eligible": False,
         "pricing_config_sha256": expected_pricing_sha256,
         "preflight_fixture_sha256": LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256,
         "preflight_protocol_sha256": LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256,
     }
+    if expected_metadata_extra is not None:
+        expected_metadata.update(expected_metadata_extra)
     if (
-        spec.task != "local_model_preflight_w3"
-        or spec.task_registry_name != "local_model_preflight_w3"
-        or spec.task_version != LOCAL_MODEL_PREFLIGHT_W3_TASK_VERSION
+        spec.task != expected_task
+        or spec.task_registry_name != expected_task
+        or spec.task_version != expected_task_version
         or (spec.metadata or {}) != expected_metadata
     ):
         raise ValueError("local W3 preflight task identity differs from the protocol")
-    if spec.model != LOCAL_OLLAMA_MODEL:
+    if spec.model != expected_model:
         raise ValueError("local W3 preflight used a different model")
     if str(spec.model_base_url).rstrip("/") != LOCAL_OLLAMA_BASE_URL:
         raise ValueError("local W3 preflight used a different provider route")
@@ -643,7 +667,7 @@ def validate_local_w3_preflight_log(
         raise ValueError("local W3 preflight requires exactly one synthetic sample")
     sample = log.samples[0]
     if (
-        sample.id != LOCAL_MODEL_PREFLIGHT_W3_SAMPLE_ID
+        sample.id != expected_sample_id
         or sample.epoch != 1
         or sample.error is not None
         or sample.invalidation is not None
@@ -651,11 +675,13 @@ def validate_local_w3_preflight_log(
         or sample.output is None
     ):
         raise ValueError("local W3 preflight sample failed or has the wrong identity")
-    if sample.output.model != LOCAL_OLLAMA_MODEL:
+    if sample.output.model != expected_model:
         raise ValueError("local W3 preflight output has the wrong model identity")
     result = LocalModelPreflightW3Result.model_validate_json(sample.output.completion)
     serialized_result = result.model_dump(mode="json")
-    expected_result_store = {"anamnesis.local_preflight_w3": serialized_result}
+    if result.model != expected_model:
+        raise ValueError("local W3 preflight result has the wrong model identity")
+    expected_result_store = {expected_store_key: serialized_result}
     if sample.metadata != expected_result_store:
         raise ValueError("local W3 preflight sample metadata differs from its result")
     if sample.store != expected_result_store:
@@ -666,8 +692,44 @@ def validate_local_w3_preflight_log(
         fixture=fixture,
         result=result,
         seed=seed,
+        expected_model=expected_model,
+        expected_service_model=expected_service_model,
     )
     return result
+
+
+def validate_local_w3_m2_preflight_log(
+    log: EvalLog,
+    *,
+    fixture: Mapping[str, Any],
+    expected_git_commit: str,
+    expected_pricing_sha256: str,
+    seed: int = 101,
+) -> LocalModelPreflightW3Result:
+    """Validate one exact W3 model-only preflight for the pinned M2 model."""
+
+    return validate_local_w3_preflight_log(
+        log,
+        fixture=fixture,
+        expected_git_commit=expected_git_commit,
+        expected_pricing_sha256=expected_pricing_sha256,
+        seed=seed,
+        expected_model=LOCAL_W3_M2_OLLAMA_MODEL,
+        expected_service_model=LOCAL_W3_M2_OLLAMA_SERVICE_MODEL,
+        expected_task="local_model_preflight_w3_m2",
+        expected_task_version=LOCAL_MODEL_PREFLIGHT_W3_M2_TASK_VERSION,
+        expected_purpose=LOCAL_MODEL_PREFLIGHT_W3_M2_PURPOSE,
+        expected_sample_id=LOCAL_MODEL_PREFLIGHT_W3_M2_SAMPLE_ID,
+        expected_store_key="anamnesis.local_preflight_w3_m2",
+        expected_metadata_extra={
+            "intervention": "model_only",
+            "parent_prompt_cell": "W3",
+            "model_artifact_sha256": (
+                "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+            ),
+            "model_only_protocol_sha256": LOCAL_W3_M2_PROTOCOL_SHA256,
+        },
+    )
 
 
 def validate_local_preflight_artifact(
@@ -760,6 +822,49 @@ def validate_local_w3_preflight_artifact(
     if artifact.sha256 != hashlib.sha256(content).hexdigest():
         raise ValueError("local W3 preflight artifact hash mismatch")
     return validate_local_w3_preflight_log(
+        read_eval_log(path, resolve_attachments=True),
+        fixture=fixture,
+        expected_git_commit=expected_git_commit,
+        expected_pricing_sha256=expected_pricing_sha256,
+        seed=seed,
+    )
+
+
+def validate_local_w3_m2_preflight_artifact(
+    artifact: ArtifactPin,
+    *,
+    fixture_artifact: ArtifactPin,
+    protocol_artifact: ArtifactPin,
+    expected_git_commit: str,
+    expected_pricing_sha256: str,
+    seed: int = 101,
+) -> LocalModelPreflightW3Result:
+    """Bind the W3-M2 result to exact W3 inputs and Inspect log bytes."""
+
+    protocol_path = Path(protocol_artifact.path)
+    fixture_path = Path(fixture_artifact.path)
+    if (
+        not protocol_path.is_file()
+        or protocol_artifact.sha256
+        != hashlib.sha256(protocol_path.read_bytes()).hexdigest()
+    ):
+        raise ValueError("local W3-M2 protocol artifact mismatch")
+    load_local_w3_preflight_protocol(protocol_path)
+    if (
+        not fixture_path.is_file()
+        or fixture_artifact.sha256
+        != hashlib.sha256(fixture_path.read_bytes()).hexdigest()
+    ):
+        raise ValueError("local W3-M2 fixture artifact mismatch")
+    fixture = load_local_w3_preflight_fixture(fixture_path)
+    path = Path(artifact.path)
+    if (
+        path.suffix != ".eval"
+        or not path.is_file()
+        or artifact.sha256 != hashlib.sha256(path.read_bytes()).hexdigest()
+    ):
+        raise ValueError("local W3-M2 preflight artifact mismatch")
+    return validate_local_w3_m2_preflight_log(
         read_eval_log(path, resolve_attachments=True),
         fixture=fixture,
         expected_git_commit=expected_git_commit,

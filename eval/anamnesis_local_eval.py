@@ -21,6 +21,12 @@ from anamnesis.local_experiment import (
     LOCAL_MODEL_ID,
     LOCAL_PRICING_PATH,
     LOCAL_PRICING_SHA256,
+    LOCAL_W3_M2_MODEL_ARTIFACT_PATH,
+    LOCAL_W3_M2_MODEL_ID,
+    LOCAL_W3_M2_PRICING_PATH,
+    LOCAL_W3_M2_PRICING_SHA256,
+    LOCAL_W3_M2_PROTOCOL_PATH,
+    LOCAL_W3_M2_PROTOCOL_SHA256,
     LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH,
     LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256,
     LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_PATH,
@@ -45,11 +51,14 @@ from anamnesis.local_runtime import (
     LOCAL_MODEL_PREFLIGHT_TASK_VERSION,
     LOCAL_MODEL_PREFLIGHT_W2_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_PURPOSE,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_TASK_VERSION,
     LOCAL_MODEL_PREFLIGHT_W3_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_W3_TASK_VERSION,
     LOCAL_OLLAMA_CONTEXT_LENGTH,
     LOCAL_SCENARIO_TASK_VERSION,
     LOCAL_SCENARIO_W3_TASK_VERSION,
+    LOCAL_W3_M2_OLLAMA_MANIFEST_SHA256,
     LOCAL_ZERO_MODEL_COST,
     LocalSystemName,
     local_decision_prompt_contract,
@@ -64,6 +73,9 @@ from anamnesis.local_runtime import (
     local_model_preflight_w2_sample,
     local_model_preflight_w2_scorer,
     local_model_preflight_w2_solver,
+    local_model_preflight_w3_m2_sample,
+    local_model_preflight_w3_m2_scorer,
+    local_model_preflight_w3_m2_solver,
     local_model_preflight_w3_sample,
     local_model_preflight_w3_scorer,
     local_model_preflight_w3_solver,
@@ -87,6 +99,9 @@ SCENARIO_DIRECTORY = Path(__file__).resolve().parent / "scenarios"
 LOCAL_MODEL_MANIFEST_RELATIVE = Path(
     "manifests/registry.ollama.ai/library/qwen3/4b-instruct"
 )
+LOCAL_W3_M2_MODEL_MANIFEST_RELATIVE = Path(
+    "manifests/registry.ollama.ai/library/qwen3.5/9b-q4_K_M"
+)
 
 # Inspect's built-in model database does not include this exact Ollama tag.
 # Inspect applies --model-cost-config before importing task modules, so that
@@ -107,6 +122,25 @@ set_model_info(
         context_length=LOCAL_OLLAMA_CONTEXT_LENGTH,
         output_tokens=LOCAL_OLLAMA_CONTEXT_LENGTH,
         family="qwen3",
+        cost=LOCAL_ZERO_MODEL_COST,
+    ),
+)
+
+ACTIVE_LOCAL_W3_M2_PRICING_SHA256 = validate_zero_api_pricing(
+    REPO_ROOT / LOCAL_W3_M2_PRICING_PATH,
+    LOCAL_W3_M2_MODEL_ID,
+)
+if ACTIVE_LOCAL_W3_M2_PRICING_SHA256 != LOCAL_W3_M2_PRICING_SHA256:
+    raise ValueError("tracked W3-M2 pricing bytes differ from the pinned SHA-256")
+set_model_info(
+    LOCAL_W3_M2_MODEL_ID,
+    ModelInfo(
+        organization="Qwen/Ollama",
+        model="qwen3.5:9b-q4_K_M",
+        snapshot="qwen3.5:9b-q4_K_M",
+        context_length=LOCAL_OLLAMA_CONTEXT_LENGTH,
+        output_tokens=LOCAL_OLLAMA_CONTEXT_LENGTH,
+        family="qwen35",
         cost=LOCAL_ZERO_MODEL_COST,
     ),
 )
@@ -142,6 +176,17 @@ def _verify_installed_model(models_dir: Path) -> int:
     return verify_ollama_artifact(
         pin,
         manifest_path=models_dir / LOCAL_MODEL_MANIFEST_RELATIVE,
+        blobs_dir=models_dir / "blobs",
+    )
+
+
+def _verify_installed_w3_m2_model(models_dir: Path) -> int:
+    pin = load_ollama_artifact_pin(REPO_ROOT / LOCAL_W3_M2_MODEL_ARTIFACT_PATH)
+    if pin.model != LOCAL_W3_M2_MODEL_ID:
+        raise ValueError("tracked W3-M2 Ollama pin identifies a different model")
+    return verify_ollama_artifact(
+        pin,
+        manifest_path=models_dir / LOCAL_W3_M2_MODEL_MANIFEST_RELATIVE,
         blobs_dir=models_dir / "blobs",
     )
 
@@ -451,6 +496,60 @@ def local_model_preflight_w3(seed: int = 101) -> Task:
             "pricing_config_sha256": ACTIVE_LOCAL_PRICING_SHA256,
             "preflight_fixture_sha256": LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256,
             "preflight_protocol_sha256": LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256,
+        },
+    )
+
+
+@task
+def local_model_preflight_w3_m2(
+    ollama_models_dir: str | None = None,
+    seed: int = 101,
+) -> Task:
+    """One W3 model-only gate for the byte-pinned Qwen3.5 9B artifact."""
+
+    if seed != 101:
+        raise ValueError("local W3-M2 preflight requires seed 101 exactly")
+    models_dir = _require_ollama_models_dir(ollama_models_dir)
+    _verify_installed_w3_m2_model(models_dir)
+    fixture_path = _repo_artifact_path(LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_PATH)
+    protocol_path = _repo_artifact_path(LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_PATH)
+    m2_protocol_path = _repo_artifact_path(LOCAL_W3_M2_PROTOCOL_PATH)
+    if hashlib.sha256(fixture_path.read_bytes()).hexdigest() != (
+        LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256
+    ):
+        raise ValueError("tracked W3 fixture differs from its frozen pin")
+    if hashlib.sha256(protocol_path.read_bytes()).hexdigest() != (
+        LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256
+    ):
+        raise ValueError("tracked W3 protocol differs from its frozen pin")
+    if hashlib.sha256(m2_protocol_path.read_bytes()).hexdigest() != (
+        LOCAL_W3_M2_PROTOCOL_SHA256
+    ):
+        raise ValueError("tracked W3-M2 protocol differs from its frozen pin")
+    return Task(
+        dataset=[local_model_preflight_w3_m2_sample()],
+        solver=local_model_preflight_w3_m2_solver(str(fixture_path)),
+        scorer=local_model_preflight_w3_m2_scorer(),
+        config=GenerateConfig(
+            temperature=0.0,
+            seed=seed,
+            cache=False,
+            max_retries=0,
+            max_connections=1,
+            adaptive_connections=False,
+        ),
+        version=LOCAL_MODEL_PREFLIGHT_W3_M2_TASK_VERSION,
+        metadata={
+            "purpose": LOCAL_MODEL_PREFLIGHT_W3_M2_PURPOSE,
+            "track": "local_zero_api_cost",
+            "hypothesis_test_eligible": False,
+            "intervention": "model_only",
+            "parent_prompt_cell": "W3",
+            "pricing_config_sha256": ACTIVE_LOCAL_W3_M2_PRICING_SHA256,
+            "preflight_fixture_sha256": LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256,
+            "preflight_protocol_sha256": LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256,
+            "model_artifact_sha256": LOCAL_W3_M2_OLLAMA_MANIFEST_SHA256,
+            "model_only_protocol_sha256": LOCAL_W3_M2_PROTOCOL_SHA256,
         },
     )
 

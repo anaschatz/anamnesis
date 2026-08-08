@@ -49,6 +49,7 @@ from anamnesis.local_experiment import (
     LOCAL_BASE_URL,
     LOCAL_MODEL_ID,
     LOCAL_OLLAMA_VERSION,
+    LOCAL_W3_M2_MODEL_ID,
     LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256,
     LOCAL_WRITER_W3_DATASET_SHA256,
     LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256,
@@ -109,6 +110,8 @@ LOCAL_RUNTIME_VERSION = "ollama.local.v0.1"
 LOCAL_DECISION_VERSION = "ollama.decision.v0.2"
 LOCAL_OLLAMA_MODEL = LOCAL_MODEL_ID
 LOCAL_OLLAMA_SERVICE_MODEL = "qwen3:4b-instruct"
+LOCAL_W3_M2_OLLAMA_MODEL = LOCAL_W3_M2_MODEL_ID
+LOCAL_W3_M2_OLLAMA_SERVICE_MODEL = "qwen3.5:9b-q4_K_M"
 LOCAL_OLLAMA_BASE_URL = LOCAL_BASE_URL
 LOCAL_OLLAMA_PS_URL = "http://127.0.0.1:11434/api/ps"
 LOCAL_OLLAMA_MANIFEST_SHA256 = (
@@ -121,6 +124,14 @@ LOCAL_OLLAMA_CONTEXT_LENGTH = 4096
 LOCAL_OLLAMA_FAMILY = "qwen3"
 LOCAL_OLLAMA_PARAMETER_SIZE = "4.0B"
 LOCAL_OLLAMA_QUANTIZATION = "Q4_K_M"
+LOCAL_W3_M2_OLLAMA_MANIFEST_SHA256 = (
+    "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+)
+LOCAL_W3_M2_OLLAMA_MODEL_BLOB_SHA256 = (
+    "dec52a44569a2a25341c4e4d3fee25846eed4f6f0b936278e3a3c900bb99d37c"
+)
+LOCAL_W3_M2_OLLAMA_FAMILY = "qwen35"
+LOCAL_W3_M2_OLLAMA_PARAMETER_SIZE = "9.7B"
 LOCAL_NO_CLOUD_ENV = "OLLAMA_NO_CLOUD"
 LOCAL_CONTEXT_ENV = "OLLAMA_CONTEXT_LENGTH"
 LOCAL_HOST_ENV = "OLLAMA_HOST"
@@ -132,6 +143,8 @@ LOCAL_PREFLIGHT_W2_METADATA_KEY = "anamnesis.local_preflight_w2"
 LOCAL_PREFLIGHT_W2_STORE_KEY = "anamnesis.local_preflight_w2"
 LOCAL_PREFLIGHT_W3_METADATA_KEY = "anamnesis.local_preflight_w3"
 LOCAL_PREFLIGHT_W3_STORE_KEY = "anamnesis.local_preflight_w3"
+LOCAL_PREFLIGHT_W3_M2_METADATA_KEY = "anamnesis.local_preflight_w3_m2"
+LOCAL_PREFLIGHT_W3_M2_STORE_KEY = "anamnesis.local_preflight_w3_m2"
 LOCAL_MODEL_PREFLIGHT_TASK_VERSION = "local.0.1"
 LOCAL_MODEL_PREFLIGHT_PURPOSE = "local-model-semantic-preflight"
 LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION = "local.w2.0.1"
@@ -140,6 +153,9 @@ LOCAL_MODEL_PREFLIGHT_W2_SAMPLE_ID = "local-model-preflight-w2-v1"
 LOCAL_MODEL_PREFLIGHT_W3_TASK_VERSION = "local.w3.0.1"
 LOCAL_MODEL_PREFLIGHT_W3_PURPOSE = "local-writer-w3-semantic-preflight"
 LOCAL_MODEL_PREFLIGHT_W3_SAMPLE_ID = "local-model-preflight-w3-v1"
+LOCAL_MODEL_PREFLIGHT_W3_M2_TASK_VERSION = "local.w3-m2.0.1"
+LOCAL_MODEL_PREFLIGHT_W3_M2_PURPOSE = "local-writer-w3-model-only-preflight"
+LOCAL_MODEL_PREFLIGHT_W3_M2_SAMPLE_ID = "local-model-preflight-w3-m2-v1"
 LOCAL_SCENARIO_TASK_VERSION = "local.0.1"
 LOCAL_SCENARIO_W3_TASK_VERSION = "local.w3.0.1"
 LOCAL_ZERO_MODEL_COST = ModelCost(
@@ -148,6 +164,23 @@ LOCAL_ZERO_MODEL_COST = ModelCost(
     input_cache_write=0.0,
     input_cache_read=0.0,
 )
+
+_LOCAL_MODEL_SPECS = {
+    LOCAL_OLLAMA_MODEL: {
+        "service_model": LOCAL_OLLAMA_SERVICE_MODEL,
+        "manifest_sha256": LOCAL_OLLAMA_MANIFEST_SHA256,
+        "family": LOCAL_OLLAMA_FAMILY,
+        "parameter_size": LOCAL_OLLAMA_PARAMETER_SIZE,
+        "quantization": LOCAL_OLLAMA_QUANTIZATION,
+    },
+    LOCAL_W3_M2_OLLAMA_MODEL: {
+        "service_model": LOCAL_W3_M2_OLLAMA_SERVICE_MODEL,
+        "manifest_sha256": LOCAL_W3_M2_OLLAMA_MANIFEST_SHA256,
+        "family": LOCAL_W3_M2_OLLAMA_FAMILY,
+        "parameter_size": LOCAL_W3_M2_OLLAMA_PARAMETER_SIZE,
+        "quantization": LOCAL_OLLAMA_QUANTIZATION,
+    },
+}
 LocalSystemName = Literal[
     "no_memory",
     "full_context",
@@ -245,7 +278,7 @@ class LocalDecisionWire(StrictModel):
 class LocalOllamaRuntimeAttestation(StrictModel):
     """Static client-side proof that Inspect targets the pinned local route."""
 
-    model: Literal[LOCAL_OLLAMA_MODEL]
+    model: str
     base_url: Literal[LOCAL_OLLAMA_BASE_URL]
     no_cloud: Literal["1"]
     context_length: Literal[LOCAL_OLLAMA_CONTEXT_LENGTH]
@@ -253,18 +286,52 @@ class LocalOllamaRuntimeAttestation(StrictModel):
     num_parallel: Literal[1]
     max_loaded_models: Literal[1]
 
+    @model_validator(mode="after")
+    def validate_model(self) -> Self:
+        if self.model not in _LOCAL_MODEL_SPECS:
+            raise ValueError("runtime attestation identifies an unpinned model")
+        return self
+
 
 class LocalLoadedModelAttestation(StrictModel):
     """Evidence from Ollama that the pinned artifact is resident locally."""
 
-    model: Literal[LOCAL_OLLAMA_SERVICE_MODEL]
-    digest: Literal[LOCAL_OLLAMA_MANIFEST_SHA256]
-    family: Literal[LOCAL_OLLAMA_FAMILY]
-    parameter_size: Literal[LOCAL_OLLAMA_PARAMETER_SIZE]
-    quantization_level: Literal[LOCAL_OLLAMA_QUANTIZATION]
+    model: str
+    digest: str
+    family: str
+    parameter_size: str
+    quantization_level: str
     context_length: Literal[LOCAL_OLLAMA_CONTEXT_LENGTH]
     size_vram: int = Field(gt=0)
     ollama_version: Literal[LOCAL_OLLAMA_VERSION]
+
+    @model_validator(mode="after")
+    def validate_model(self) -> Self:
+        matches = [
+            spec
+            for spec in _LOCAL_MODEL_SPECS.values()
+            if spec["service_model"] == self.model
+        ]
+        if len(matches) != 1:
+            raise ValueError("loaded-model attestation identifies an unpinned model")
+        spec = matches[0]
+        expected = (
+            spec["manifest_sha256"],
+            spec["family"],
+            spec["parameter_size"],
+            spec["quantization"],
+        )
+        if (
+            self.digest,
+            self.family,
+            self.parameter_size,
+            self.quantization_level,
+        ) != expected:
+            raise ValueError(
+                "loaded-model digest/family/parameter-size/quantization differs "
+                "from the model pin"
+            )
+        return self
 
 
 class LocalModelPreflightResult(StrictModel):
@@ -366,7 +433,7 @@ class LocalModelPreflightW3CaseResult(StrictModel):
 class LocalModelPreflightW3Result(StrictModel):
     """Nine-call W3 semantic, accounting and local-residency gate result."""
 
-    model: Literal[LOCAL_OLLAMA_MODEL]
+    model: str
     runtime: LocalOllamaRuntimeAttestation
     loaded_model: LocalLoadedModelAttestation | None = None
     same_model_for_compiler_and_decision: bool
@@ -378,6 +445,8 @@ class LocalModelPreflightW3Result(StrictModel):
 
     @model_validator(mode="after")
     def validate_case_order(self) -> Self:
+        if self.model not in _LOCAL_MODEL_SPECS:
+            raise ValueError("W3 preflight result identifies an unpinned model")
         identity = [(case.case_id, case.role) for case in self.cases]
         expected = [
             ("C1", "compiler"),
@@ -566,7 +635,7 @@ def local_memory_compiler_w3_transport_contract() -> str:
 
 
 def _local_decision_schema(model_name: str) -> ResponseSchema:
-    if model_name != LOCAL_OLLAMA_MODEL:
+    if model_name not in _LOCAL_MODEL_SPECS:
         raise ValueError("local decision schema requires the pinned Ollama model")
     return ResponseSchema(
         name="anamnesis_local_decision",
@@ -576,7 +645,7 @@ def _local_decision_schema(model_name: str) -> ResponseSchema:
 
 
 def _local_memory_delta_schema(model_name: str) -> ResponseSchema:
-    if model_name != LOCAL_OLLAMA_MODEL:
+    if model_name not in _LOCAL_MODEL_SPECS:
         raise ValueError("local compiler schema requires the pinned Ollama model")
     compiler_schema = json_schema(LocalMemoryDeltaWire)
     if compiler_schema.properties is None:
@@ -637,7 +706,7 @@ def _verify_local_ollama_runtime(
 ) -> LocalOllamaRuntimeAttestation:
     """Fail closed unless Inspect targets the exact local, no-cloud runtime."""
 
-    if model_name != LOCAL_OLLAMA_MODEL:
+    if model_name not in _LOCAL_MODEL_SPECS:
         raise ValueError("local track requires the pinned Ollama model")
     api = getattr(active_model, "api", None)
     if getattr(api, "service", None) != "Ollama":
@@ -660,7 +729,7 @@ def _verify_local_ollama_runtime(
     active_environ = os.environ if environ is None else environ
     require_local_only_environment(active_environ)
     return LocalOllamaRuntimeAttestation(
-        model=LOCAL_OLLAMA_MODEL,
+        model=model_name,
         base_url=LOCAL_OLLAMA_BASE_URL,
         no_cloud="1",
         context_length=LOCAL_OLLAMA_CONTEXT_LENGTH,
@@ -670,8 +739,18 @@ def _verify_local_ollama_runtime(
     )
 
 
-def _verify_local_output_model(output: ModelOutput) -> None:
-    if output.model not in {LOCAL_OLLAMA_MODEL, LOCAL_OLLAMA_SERVICE_MODEL}:
+def _verify_local_output_model(
+    output: ModelOutput,
+    *,
+    expected_model: str | None = None,
+) -> None:
+    allowed = {
+        value
+        for model, spec in _LOCAL_MODEL_SPECS.items()
+        for value in (model, str(spec["service_model"]))
+        if expected_model is None or model == expected_model
+    }
+    if output.model not in allowed:
         raise ValueError("Ollama response model differs from the pinned local model")
 
 
@@ -681,10 +760,14 @@ def _verify_effective_zero_model_cost(active_model: object) -> None:
         raise ValueError("active Inspect model lacks the pinned all-zero local pricing")
 
 
-def _local_usage_from_output(output: ModelOutput) -> Usage:
+def _local_usage_from_output(
+    output: ModelOutput,
+    *,
+    expected_model: str | None = None,
+) -> Usage:
     """Account local inference as complete API cost $0, never as unknown cost."""
 
-    _verify_local_output_model(output)
+    _verify_local_output_model(output, expected_model=expected_model)
     model_usage = output.usage
     if model_usage is None:
         return Usage(cost_usd=0.0)
@@ -704,8 +787,12 @@ def _local_usage_from_output(output: ModelOutput) -> Usage:
     )
 
 
-def _local_usage_is_complete(output: ModelOutput) -> bool:
-    usage = _local_usage_from_output(output)
+def _local_usage_is_complete(
+    output: ModelOutput,
+    *,
+    expected_model: str | None = None,
+) -> bool:
+    usage = _local_usage_from_output(output, expected_model=expected_model)
     return (
         output.usage is not None and usage.input_tokens > 0 and usage.output_tokens > 0
     )
@@ -742,7 +829,7 @@ class LocalInspectDecisionModel(DecisionModel):
             response_schema=response_schema,
         )
         output = self.state.output
-        _verify_local_output_model(output)
+        _verify_local_output_model(output, expected_model=self.name)
         return output, max(0.0, (perf_counter() - started) * 1000)
 
     async def decide(self, request: DecisionRequest) -> DecisionCall:
@@ -758,8 +845,8 @@ class LocalInspectDecisionModel(DecisionModel):
         except (ValidationError, ValueError):
             decision = Decision()
             parse_error = True
-        usage = _local_usage_from_output(output)
-        usage_complete = _local_usage_is_complete(output)
+        usage = _local_usage_from_output(output, expected_model=self.name)
+        usage_complete = _local_usage_is_complete(output, expected_model=self.name)
         return DecisionCall(
             decision=decision,
             usage=usage,
@@ -818,14 +905,20 @@ def _loaded_model_from_ps(
     payload: object,
     *,
     ollama_version: str = LOCAL_OLLAMA_VERSION,
+    expected_model: str = LOCAL_OLLAMA_MODEL,
 ) -> LocalLoadedModelAttestation:
+    try:
+        spec = _LOCAL_MODEL_SPECS[expected_model]
+    except KeyError as error:
+        raise ValueError("residency probe requires a pinned model") from error
+    service_model = str(spec["service_model"])
     if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
         raise ValueError("Ollama /api/ps returned an invalid response")
     matches = [
         item
         for item in payload["models"]
         if isinstance(item, dict)
-        and item.get("model", item.get("name")) == LOCAL_OLLAMA_SERVICE_MODEL
+        and item.get("model", item.get("name")) == service_model
     ]
     if len(matches) != 1:
         raise ValueError("pinned Ollama model is not uniquely loaded locally")
@@ -834,7 +927,7 @@ def _loaded_model_from_ps(
     if not isinstance(details, dict):
         raise ValueError("Ollama /api/ps omitted loaded-model details")
     return LocalLoadedModelAttestation(
-        model=LOCAL_OLLAMA_SERVICE_MODEL,
+        model=service_model,
         digest=model.get("digest"),
         family=details.get("family"),
         parameter_size=details.get("parameter_size"),
@@ -845,7 +938,9 @@ def _loaded_model_from_ps(
     )
 
 
-def probe_loaded_local_model() -> LocalLoadedModelAttestation:
+def probe_loaded_local_model(
+    expected_model: str = LOCAL_OLLAMA_MODEL,
+) -> LocalLoadedModelAttestation:
     """Query only Ollama's loopback process endpoint for residency evidence."""
 
     # HTTPConnection is intentionally used instead of a URL opener so proxy
@@ -871,7 +966,11 @@ def probe_loaded_local_model() -> LocalLoadedModelAttestation:
         payload = json.loads(response.read())
     finally:
         connection.close()
-    return _loaded_model_from_ps(payload, ollama_version=ollama_version)
+    return _loaded_model_from_ps(
+        payload,
+        ollama_version=ollama_version,
+        expected_model=expected_model,
+    )
 
 
 def _compiler_preflight_semantics(call: CompilerCall) -> bool:
@@ -1606,9 +1705,7 @@ async def run_local_model_preflight_w3(
     model: LocalInspectDecisionModel,
     *,
     fixture: Mapping[str, Any],
-    residency_probe: Callable[[], LocalLoadedModelAttestation] = (
-        probe_loaded_local_model
-    ),
+    residency_probe: Callable[[], LocalLoadedModelAttestation] | None = None,
 ) -> LocalModelPreflightW3Result:
     """Run frozen C1-C8,D1 exactly once each, without retry or repair."""
 
@@ -1693,9 +1790,12 @@ async def run_local_model_preflight_w3(
         )
     )
 
+    active_residency_probe = residency_probe or (
+        lambda: probe_loaded_local_model(model.name)
+    )
     probe_started = perf_counter()
     try:
-        loaded_model = await asyncio.to_thread(residency_probe)
+        loaded_model = await asyncio.to_thread(active_residency_probe)
     except (OSError, ValueError, ValidationError, json.JSONDecodeError):
         loaded_model = None
     probe_latency_ms = max(0.0, (perf_counter() - probe_started) * 1000)
@@ -1713,7 +1813,7 @@ async def run_local_model_preflight_w3(
         )
     )
     return LocalModelPreflightW3Result(
-        model=LOCAL_OLLAMA_MODEL,
+        model=model.name,
         runtime=model.runtime_attestation,
         loaded_model=loaded_model,
         same_model_for_compiler_and_decision=same_model,
@@ -1834,6 +1934,16 @@ def local_model_preflight_w3_sample() -> Sample:
     )
 
 
+def local_model_preflight_w3_m2_sample() -> Sample:
+    """Return the model-only W3 compatibility sample, never scenario data."""
+
+    return Sample(
+        id=LOCAL_MODEL_PREFLIGHT_W3_M2_SAMPLE_ID,
+        input="Check W3 with the separately pinned M2 local model.",
+        target="pass",
+    )
+
+
 @solver
 def local_model_preflight_solver() -> Solver:
     """Standalone diagnostic gate that exposes failure instead of raising."""
@@ -1900,6 +2010,30 @@ def local_model_preflight_w3_solver(fixture_path: str) -> Solver:
     return solve
 
 
+@solver
+def local_model_preflight_w3_m2_solver(fixture_path: str) -> Solver:
+    """Standalone W3-M2 gate using the unchanged W3 fixture and prompts."""
+
+    fixture = load_local_w3_preflight_fixture(fixture_path)
+
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        if str(state.model) != LOCAL_W3_M2_OLLAMA_MODEL:
+            raise ValueError("W3-M2 preflight requires the pinned M2 model")
+        model = LocalInspectDecisionModel(state, generate)
+        result = await run_local_model_preflight_w3(model, fixture=fixture)
+        state = model.state
+        serialized = result.model_dump(mode="json")
+        state.metadata[LOCAL_PREFLIGHT_W3_M2_METADATA_KEY] = serialized
+        state.store.set(LOCAL_PREFLIGHT_W3_M2_STORE_KEY, serialized)
+        state.output = ModelOutput.from_content(
+            model=model.name,
+            content=result.model_dump_json(),
+        )
+        return state
+
+    return solve
+
+
 @scorer(metrics=[])
 def local_model_preflight_scorer() -> Scorer:
     """Score local compatibility only, never reminder quality."""
@@ -1957,6 +2091,29 @@ def local_model_preflight_w3_scorer() -> Scorer:
                 "local W3 C1-C8,D1 semantics, residency and zero-cost accounting passed"
                 if result.passed
                 else "local model failed one or more frozen W3 preflight checks"
+            ),
+        )
+
+    return score
+
+
+@scorer(metrics=[])
+def local_model_preflight_w3_m2_scorer() -> Scorer:
+    """Score only W3 compatibility for the frozen M2 model-only cell."""
+
+    async def score(state: TaskState, target: Target) -> Score:
+        result = LocalModelPreflightW3Result.model_validate_json(
+            state.output.completion
+        )
+        if result.model != LOCAL_W3_M2_OLLAMA_MODEL:
+            raise ValueError("W3-M2 scorer received a different model")
+        return Score(
+            value=1 if result.passed else 0,
+            answer=result.model,
+            explanation=(
+                "W3 C1-C8,D1 passed with the frozen M2 local model"
+                if result.passed
+                else "the frozen M2 model failed one or more W3 checks"
             ),
         )
 
