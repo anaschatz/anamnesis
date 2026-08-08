@@ -489,6 +489,7 @@ def build_local_decision_prompt(
     context_events: list[ObservableEvent],
     decision_history: list[Any] | None = None,
     memory_view: Any | None = None,
+    retrospective_recall: list[str] | tuple[str, ...] | None = None,
 ) -> str:
     """Render the common decision information with a local-only wire guide."""
 
@@ -498,6 +499,7 @@ def build_local_decision_prompt(
         context_events=context_events,
         decision_history=decision_history,
         memory_view=memory_view,
+        retrospective_recall=retrospective_recall,
     )
     if (
         _HOSTED_NO_ACTION_SENTENCE not in hosted

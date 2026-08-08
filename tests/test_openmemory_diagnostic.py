@@ -10,17 +10,20 @@ from pathlib import Path
 import pytest
 
 from anamnesis.io import canonical_sha256
+from anamnesis.local_runtime import build_local_decision_prompt
 from anamnesis.openmemory_diagnostic import (
     FrozenDiagnosticRecallSnapshot,
     OpenMemoryDiagnosticArtifact,
     build_openmemory_case_prompts,
     load_openmemory_diagnostic,
     openmemory_diagnostic_sha256,
+    run_openmemory_decision_diagnostic,
     score_openmemory_decision,
     score_openmemory_pair,
 )
 from anamnesis.prompts import build_decision_prompt
-from anamnesis.schema import Decision, ProposedAction
+from anamnesis.runner import DecisionCall, DecisionRequest
+from anamnesis.schema import Decision, ProposedAction, Usage
 
 ROOT = Path(__file__).resolve().parents[1]
 DATASET_PATH = ROOT / "eval" / "openmemory" / "decision_diagnostic.v1.json"
@@ -112,6 +115,21 @@ def test_paired_prompt_builder_changes_only_the_recall_surface() -> None:
             assert hit.content not in baseline
             assert hit.content in recall
             assert hit.fixture_id not in recall
+
+
+def test_local_decision_wire_prompt_accepts_the_same_additive_recall_surface() -> None:
+    artifact = load_openmemory_diagnostic(DATASET_PATH)
+    case = artifact.cases[0]
+
+    baseline, recall = build_openmemory_case_prompts(
+        case,
+        prompt_builder=build_local_decision_prompt,
+    )
+
+    assert '"mode":"no_action"' in baseline
+    assert "Retrospective recall" not in baseline
+    assert "Retrospective recall" in recall
+    assert case.hits[0].content in recall
 
 
 def test_frozen_snapshot_is_exact_search_only_and_query_bound() -> None:
@@ -230,3 +248,49 @@ def test_paired_gate_rejects_missing_or_extra_cases() -> None:
 
     with pytest.raises(ValueError, match="cover every diagnostic case exactly"):
         score_openmemory_pair(artifact, baseline=decisions, recall=decisions)
+
+
+def test_diagnostic_runner_makes_exactly_sixteen_ordered_calls() -> None:
+    artifact = load_openmemory_diagnostic(DATASET_PATH)
+    by_event = {case.event.id: case for case in artifact.cases}
+
+    class FrozenModel:
+        name = "fake/frozen-decision"
+
+        def __init__(self) -> None:
+            self.requests: list[DecisionRequest] = []
+
+        async def decide(self, request: DecisionRequest) -> DecisionCall:
+            self.requests.append(request)
+            case = by_event[request.event.id]
+            has_recall = "Retrospective recall" in request.prompt
+            if case.helpful_hit_ids and not has_recall:
+                decision = Decision()
+            else:
+                decision = _expected_decision(case)
+            return DecisionCall(
+                decision=decision,
+                usage=Usage(
+                    input_tokens=10,
+                    uncached_input_tokens=10,
+                    output_tokens=2,
+                    cost_usd=0.0,
+                ),
+                latency_ms=1.0,
+                raw_completion=decision.model_dump_json(),
+                usage_complete=True,
+                cost_complete=True,
+            )
+
+    model = FrozenModel()
+    run = asyncio.run(run_openmemory_decision_diagnostic(artifact, model=model))
+
+    assert len(model.requests) == len(artifact.cases) * 2 == 16
+    assert [(call.case_id, call.arm) for call in run.calls] == [
+        pair
+        for case in artifact.cases
+        for pair in ((case.id, "baseline"), (case.id, "recall"))
+    ]
+    assert all(call.usage_complete and call.cost_complete for call in run.calls)
+    assert run.metrics.helpful_gain == 1
+    assert run.metrics.gate_passed is True

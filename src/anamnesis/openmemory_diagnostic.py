@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Literal, Self
 
@@ -19,7 +19,8 @@ from anamnesis.openmemory_recall import (
     RecallSearchResult,
 )
 from anamnesis.prompts import build_decision_prompt
-from anamnesis.schema import ActionValue, Decision, ObservableEvent, StrictModel
+from anamnesis.runner import DecisionModel, DecisionRequest
+from anamnesis.schema import ActionValue, Decision, ObservableEvent, StrictModel, Usage
 
 RecallHitLabel = Literal["helpful", "stale", "irrelevant", "adversarial"]
 RecallCaseFamily = Literal[
@@ -147,6 +148,36 @@ class PairedRecallMetrics(StrictModel):
     gate_passed: bool
 
 
+class RecallArmCall(StrictModel):
+    """Auditable output from one of the two paired decision calls."""
+
+    case_id: str
+    arm: Literal["baseline", "recall"]
+    prompt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    decision: Decision
+    usage: Usage
+    latency_ms: float = Field(ge=0)
+    parse_error: bool
+    raw_completion: str | None = None
+    usage_complete: bool
+    cost_complete: bool
+    score: RecallDecisionScore
+
+
+class OpenMemoryPairedRun(StrictModel):
+    """Exactly two ordered decision calls per frozen case."""
+
+    artifact_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    calls: tuple[RecallArmCall, ...]
+    metrics: PairedRecallMetrics
+
+    @model_validator(mode="after")
+    def validate_matrix(self) -> Self:
+        if len(self.calls) != self.metrics.case_count * 2:
+            raise ValueError("paired run must contain exactly two calls per case")
+        return self
+
+
 class FrozenDiagnosticRecallSnapshot:
     """Search-only deterministic snapshot for one frozen diagnostic case."""
 
@@ -200,6 +231,8 @@ class FrozenDiagnosticRecallSnapshot:
 
 def build_openmemory_case_prompts(
     case: OpenMemoryDiagnosticCase,
+    *,
+    prompt_builder: Callable[..., str] = build_decision_prompt,
 ) -> tuple[str, str]:
     """Return the paired prompts; recall is the only changed input surface."""
 
@@ -210,8 +243,8 @@ def build_openmemory_case_prompts(
         "decision_history": [],
         "memory_view": None,
     }
-    baseline = build_decision_prompt(**kwargs)
-    recall = build_decision_prompt(
+    baseline = prompt_builder(**kwargs)
+    recall = prompt_builder(
         **kwargs,
         retrospective_recall=tuple(hit.content for hit in case.hits),
     )
@@ -307,6 +340,55 @@ def score_openmemory_pair(
     )
 
 
+async def run_openmemory_decision_diagnostic(
+    artifact: OpenMemoryDiagnosticArtifact,
+    *,
+    model: DecisionModel,
+    prompt_builder: Callable[..., str] = build_decision_prompt,
+) -> OpenMemoryPairedRun:
+    """Run baseline then recall once per case, with no retry or repair loop."""
+
+    calls: list[RecallArmCall] = []
+    baseline_decisions: dict[str, Decision] = {}
+    recall_decisions: dict[str, Decision] = {}
+    for case in artifact.cases:
+        baseline_prompt, recall_prompt = build_openmemory_case_prompts(
+            case,
+            prompt_builder=prompt_builder,
+        )
+        for arm, prompt, destination in (
+            ("baseline", baseline_prompt, baseline_decisions),
+            ("recall", recall_prompt, recall_decisions),
+        ):
+            call = await model.decide(DecisionRequest(event=case.event, prompt=prompt))
+            destination[case.id] = call.decision
+            calls.append(
+                RecallArmCall(
+                    case_id=case.id,
+                    arm=arm,
+                    prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest(),
+                    decision=call.decision,
+                    usage=call.usage,
+                    latency_ms=call.latency_ms,
+                    parse_error=call.parse_error,
+                    raw_completion=call.raw_completion,
+                    usage_complete=call.usage_complete,
+                    cost_complete=call.cost_complete,
+                    score=score_openmemory_decision(case, call.decision),
+                )
+            )
+    metrics = score_openmemory_pair(
+        artifact,
+        baseline=baseline_decisions,
+        recall=recall_decisions,
+    )
+    return OpenMemoryPairedRun(
+        artifact_sha256=openmemory_diagnostic_sha256(artifact),
+        calls=tuple(calls),
+        metrics=metrics,
+    )
+
+
 def load_openmemory_diagnostic(path: str | Path) -> OpenMemoryDiagnosticArtifact:
     return OpenMemoryDiagnosticArtifact.model_validate_json(
         Path(path).read_text(encoding="utf-8")
@@ -329,11 +411,14 @@ __all__ = [
     "FrozenRecallHit",
     "OpenMemoryDiagnosticArtifact",
     "OpenMemoryDiagnosticCase",
+    "OpenMemoryPairedRun",
     "PairedRecallMetrics",
+    "RecallArmCall",
     "RecallDecisionScore",
     "build_openmemory_case_prompts",
     "load_openmemory_diagnostic",
     "openmemory_diagnostic_sha256",
+    "run_openmemory_decision_diagnostic",
     "score_openmemory_decision",
     "score_openmemory_pair",
 ]
