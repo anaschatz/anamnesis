@@ -226,6 +226,10 @@ class FactKey(MemoryModel):
 
     @property
     def canonical(self) -> str:
+        return f"{len(self.entity)}:{self.entity}{self.attribute}"
+
+    @property
+    def display(self) -> str:
         return f"{self.entity}.{self.attribute}"
 
 
@@ -255,6 +259,10 @@ class FactKeyTemplate(MemoryModel):
 
     @property
     def canonical(self) -> str:
+        return f"{len(self.entity)}:{self.entity}{self.attribute}"
+
+    @property
+    def display(self) -> str:
         return f"{self.entity}.{self.attribute}"
 
     def resolve(self, scheduled: datetime, zone: ZoneInfo | None) -> FactKey:
@@ -355,6 +363,8 @@ class RecurringTrigger(MemoryModel):
             raise ValueError("recurring weekdays must be unique")
         if self.end_date < self.start_date:
             raise ValueError("recurring end_date precedes start_date")
+        if (self.end_date - self.start_date).days > 366:
+            raise ValueError("recurring trigger range cannot exceed 366 days")
         try:
             ZoneInfo(self.timezone)
         except ZoneInfoNotFoundError as error:
@@ -619,6 +629,43 @@ class MemoryDelta(MemoryModel):
         return self
 
 
+class CompilerFactView(MemoryModel):
+    """Only the current semantic fact fields needed by the compiler."""
+
+    entity: str = Field(min_length=1, pattern=_FACT_NAME)
+    attribute: str = Field(min_length=1, pattern=_FACT_NAME)
+    value: ActionValue
+    unit: str | None = Field(default=None, min_length=1)
+
+
+class CompilerConditionView(MemoryModel):
+    """Wire-aligned condition projection safe for direct model reuse."""
+
+    entity: str
+    attribute: str
+    key_template: bool = False
+    operator: Literal["eq", "gte", "lte"]
+    value: ActionValue
+    unit: str | None = Field(default=None, min_length=1)
+
+
+class CompilerIntentView(MemoryModel):
+    """Active intent semantics without reducer-owned revision metadata."""
+
+    intent_id: str = Field(min_length=1, pattern=_NORMALIZED_NAME)
+    trigger: Trigger
+    required_conditions: tuple[CompilerConditionView, ...] = ()
+    blockers: tuple[CompilerConditionView, ...] = ()
+    action_template: ActionTemplate
+
+
+class CompilerStateView(MemoryModel):
+    """Minimal, closed state projection crossing into the LLM compiler."""
+
+    facts: tuple[CompilerFactView, ...] = ()
+    intents: tuple[CompilerIntentView, ...] = ()
+
+
 class Occurrence(MemoryModel):
     """One independently versioned appearance of an intent trigger."""
 
@@ -802,6 +849,33 @@ class InMemoryAnamnesis:
         self._selection_due_ids: tuple[str, ...] = ()
         self._selection_committed = True
 
+    def _fork(self) -> InMemoryAnamnesis:
+        """Copy container state while sharing only immutable record values."""
+
+        fork = object.__new__(type(self))
+        fork._events = list(self._events)
+        fork._event_ids = set(self._event_ids)
+        fork._fact_revisions = list(self._fact_revisions)
+        fork._current_facts = dict(self._current_facts)
+        fork._intent_revisions = list(self._intent_revisions)
+        fork._current_intents = dict(self._current_intents)
+        fork._occurrence_revisions = list(self._occurrence_revisions)
+        fork._current_occurrences = dict(self._current_occurrences)
+        fork._executions = list(self._executions)
+        fork._delta_audit = list(self._delta_audit)
+        fork._condition_states = dict(self._condition_states)
+        fork._selection_event_id = self._selection_event_id
+        fork._selection_due_ids = self._selection_due_ids
+        fork._selection_committed = self._selection_committed
+        return fork
+
+    def validate_delta(self, event: ObservableEvent, delta: MemoryDelta) -> None:
+        """Dry-run a delta against exact current state without mutating the store."""
+
+        result = self._fork().ingest(event, delta)
+        if not result.accepted:
+            raise MemorySemanticError(result.error or "memory delta was rejected")
+
     @property
     def events(self) -> tuple[ObservableEvent, ...]:
         return tuple(self._events)
@@ -837,19 +911,53 @@ class InMemoryAnamnesis:
         )
 
     def compiler_state(self) -> str:
-        """Return only active compact state, never raw history or future data."""
+        """Return minimal active semantics, never revisions or provenance."""
 
         active_intents = [
             intent for intent in self.current_intents if intent.status == "active"
         ]
-        return _canonical_json(
-            {
-                "facts": [fact.model_dump(mode="json") for fact in self.current_facts],
-                "intents": [
-                    intent.model_dump(mode="json") for intent in active_intents
-                ],
-            }
+        view = CompilerStateView(
+            facts=tuple(
+                CompilerFactView(
+                    entity=fact.key.entity,
+                    attribute=fact.key.attribute,
+                    value=fact.value,
+                    unit=fact.unit,
+                )
+                for fact in self.current_facts
+            ),
+            intents=tuple(
+                CompilerIntentView(
+                    intent_id=intent.intent_id,
+                    trigger=intent.trigger,
+                    required_conditions=tuple(
+                        CompilerConditionView(
+                            entity=condition.key.entity,
+                            attribute=condition.key.attribute,
+                            key_template=isinstance(condition.key, FactKeyTemplate),
+                            operator=condition.operator,
+                            value=condition.value,
+                            unit=condition.unit,
+                        )
+                        for condition in intent.required_conditions
+                    ),
+                    blockers=tuple(
+                        CompilerConditionView(
+                            entity=condition.key.entity,
+                            attribute=condition.key.attribute,
+                            key_template=isinstance(condition.key, FactKeyTemplate),
+                            operator=condition.operator,
+                            value=condition.value,
+                            unit=condition.unit,
+                        )
+                        for condition in intent.blockers
+                    ),
+                    action_template=intent.action_template,
+                )
+                for intent in active_intents
+            ),
         )
+        return _canonical_json(view)
 
     def state_hash(self) -> str:
         """Hash all behaviorally relevant state using canonical JSON."""
@@ -1052,17 +1160,6 @@ class InMemoryAnamnesis:
                 None,
             )
             if action_index is None:
-                action_index = next(
-                    (
-                        index
-                        for index, action in enumerate(decision.actions)
-                        if index not in matched_actions
-                        and action.action_key == occurrence.action_key
-                        and action.kind == occurrence.action_template.kind
-                    ),
-                    None,
-                )
-            if action_index is None:
                 self._transition_occurrence(occurrence, "expired", current)
                 expired.append(occurrence_id)
                 continue
@@ -1070,11 +1167,7 @@ class InMemoryAnamnesis:
             action = decision.actions[action_index]
             matched_actions.add(action_index)
             self._transition_occurrence(occurrence, "executed", current)
-            evidence = tuple(
-                event_id
-                for event_id in action.evidence_event_ids
-                if event_id in self._event_ids
-            )
+            evidence = occurrence.evidence_event_ids
             self._executions.append(
                 ExecutionRecord(
                     execution_id=f"execution:{occurrence_id}",
@@ -1110,7 +1203,7 @@ class InMemoryAnamnesis:
         fact = self._current_facts.get(key.canonical)
         if fact is None:
             return TruthValue.UNKNOWN
-        if condition.unit is not None and fact.unit != condition.unit:
+        if fact.unit != condition.unit:
             return TruthValue.UNKNOWN
         if condition.operator == "eq":
             if isinstance(condition.value, bool) or isinstance(fact.value, bool):
@@ -1217,6 +1310,7 @@ class InMemoryAnamnesis:
     ) -> None:
         if mutation.intent_id in current:
             raise MemorySemanticError(f"intent already exists: {mutation.intent_id}")
+        self._validate_trigger_horizon(mutation.trigger, event.at)
         action_key = event.id
         semantic_leaves = _intent_semantic_leaves(
             action_key=action_key,
@@ -1272,6 +1366,8 @@ class InMemoryAnamnesis:
             if value != values[field_name]:
                 values[field_name] = value
                 changed.add(field_name)
+        if not changed:
+            raise MemorySemanticError("intent update does not change active semantics")
         if (
             isinstance(values["trigger"], ConditionTransitionTrigger)
             and not values["required_conditions"]
@@ -1279,6 +1375,12 @@ class InMemoryAnamnesis:
             raise MemorySemanticError(
                 "condition_transition requires at least one required condition"
             )
+        trigger = values["trigger"]
+        assert isinstance(
+            trigger,
+            AtTrigger | RecurringTrigger | ConditionTransitionTrigger,
+        )
+        self._validate_trigger_horizon(trigger, event.at)
 
         closed = previous.model_copy(update={"valid_to": event.at})
         self._replace_revision(revisions, previous.revision_id, closed)
@@ -1330,6 +1432,40 @@ class InMemoryAnamnesis:
         )
         if changed & {"trigger", "required_conditions", "blockers"}:
             condition_states.pop(mutation.intent_id, None)
+
+    @staticmethod
+    def _validate_trigger_horizon(trigger: Trigger, source_at: datetime) -> None:
+        """Reject trigger contracts with no possible future occurrence."""
+
+        if isinstance(trigger, AtTrigger):
+            if trigger.at <= source_at:
+                raise MemorySemanticError(
+                    "at trigger must be strictly after its source event"
+                )
+            return
+        if isinstance(trigger, ConditionTransitionTrigger):
+            if trigger.active_until <= source_at:
+                raise MemorySemanticError(
+                    "condition trigger window must extend past its source event"
+                )
+            return
+
+        zone = ZoneInfo(trigger.timezone)
+        weekdays = {_WEEKDAY_INDEX[name] for name in trigger.weekdays}
+        day = trigger.start_date
+        while day <= trigger.end_date:
+            if day.weekday() in weekdays:
+                scheduled = datetime.combine(day, trigger.local_time, tzinfo=zone)
+                round_trip = scheduled.astimezone(UTC).astimezone(zone)
+                if (
+                    round_trip.replace(tzinfo=None) == scheduled.replace(tzinfo=None)
+                    and scheduled > source_at
+                ):
+                    return
+            day += timedelta(days=1)
+        raise MemorySemanticError(
+            "recurring trigger has no valid occurrence after its source event"
+        )
 
     def _stage_cancel_intent(
         self,
@@ -1475,14 +1611,20 @@ class InMemoryAnamnesis:
     ) -> None:
         trigger = intent.trigger
         assert isinstance(trigger, ConditionTransitionTrigger)
-        if not trigger.active_from <= current.at <= trigger.active_until:
-            return
         eligibility, facts = self._evaluate_intent(intent, current.at, None)
         previous = self._condition_states.get(intent.intent_id, TruthValue.UNKNOWN)
         self._condition_states[intent.intent_id] = eligibility
-        # Creating a conditional intention establishes its baseline; it is not
-        # itself a world-state transition and must not produce an acknowledgement.
-        if intent.revision == 1 and current.id == intent.source_event_id:
+        if not trigger.active_from <= current.at <= trigger.active_until:
+            return
+        # A create or condition-contract update establishes a new baseline;
+        # an action-template-only update must not suppress a real fact
+        # transition that occurs in the same observable event.
+        if current.id == intent.source_event_id and any(
+            current.id in sources
+            for path, sources in intent.field_provenance.items()
+            if path.split(".", maxsplit=1)[0]
+            in {"trigger", "required_conditions", "blockers"}
+        ):
             return
         if eligibility != TruthValue.TRUE or previous == TruthValue.TRUE:
             return
@@ -1497,7 +1639,7 @@ class InMemoryAnamnesis:
         if occurrence_id in self._current_occurrences:
             return
         action = self._resolve_action(intent.action_template, current.at, None)
-        evidence = self._intent_evidence(intent, facts)
+        evidence = self._checkpoint_evidence(intent, facts, current)
         occurrence = Occurrence(
             occurrence_id=occurrence_id,
             revision_id=f"occurrence:{occurrence_id}:r1",
@@ -1539,7 +1681,7 @@ class InMemoryAnamnesis:
             "pending" if eligibility == TruthValue.TRUE else "suppressed"
         )
         action = self._resolve_action(intent.action_template, scheduled, zone)
-        evidence = self._intent_evidence(intent, facts)
+        evidence = self._checkpoint_evidence(intent, facts, current)
         occurrence = Occurrence(
             occurrence_id=occurrence_id,
             revision_id=f"occurrence:{occurrence_id}:r1",
@@ -1637,6 +1779,19 @@ class InMemoryAnamnesis:
         order = {event.id: index for index, event in enumerate(self._events)}
         return tuple(sorted(evidence, key=lambda item: (order.get(item, 10**9), item)))
 
+    def _checkpoint_evidence(
+        self,
+        intent: IntentRevision,
+        facts: tuple[FactRevision, ...],
+        current: ObservableEvent,
+    ) -> tuple[str, ...]:
+        """Add the trigger checkpoint to the store-owned causal evidence."""
+
+        evidence = set(self._intent_evidence(intent, facts))
+        evidence.add(current.id)
+        order = {event.id: index for index, event in enumerate(self._events)}
+        return tuple(sorted(evidence, key=lambda item: (order[item], item)))
+
     @staticmethod
     def _resolve_action(
         template: ActionTemplate,
@@ -1730,10 +1885,10 @@ class InMemoryAnamnesis:
             blocks.append(
                 MemoryViewBlock(
                     kind="fact",
-                    title=f"Current fact: {fact.key.canonical}",
+                    title=f"Current fact: {fact.key.display}",
                     content=_canonical_json(
                         {
-                            "key": fact.key.canonical,
+                            "key": fact.key.display,
                             "value": fact.value,
                             "unit": fact.unit,
                             "valid_from": fact.valid_from.isoformat(),

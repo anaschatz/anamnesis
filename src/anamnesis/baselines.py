@@ -46,6 +46,7 @@ class StrategyWork:
     raw_compiler_output: str | None = None
     memory_delta_json: str | None = None
     memory_delta_accepted: bool | None = None
+    memory_delta_error: str | None = None
     state_sha256: str | None = None
     due_candidate_ids: list[str] = field(default_factory=list)
     usage_complete: bool = True
@@ -74,6 +75,11 @@ class StrategyWork:
                 other.memory_delta_accepted
                 if other.memory_delta_accepted is not None
                 else self.memory_delta_accepted
+            ),
+            memory_delta_error=(
+                other.memory_delta_error
+                if other.memory_delta_error is not None
+                else self.memory_delta_error
             ),
             state_sha256=other.state_sha256 or self.state_sha256,
             due_candidate_ids=other.due_candidate_ids or self.due_candidate_ids,
@@ -456,6 +462,7 @@ class AnamnesisMemoryStrategy:
                 call.delta.model_dump_json() if call.delta is not None else None
             ),
             memory_delta_accepted=result.accepted,
+            memory_delta_error=result.error,
             state_sha256=result.state_sha256,
             usage_complete=call.usage_complete,
             cost_complete=call.cost_complete,

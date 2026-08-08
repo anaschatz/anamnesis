@@ -191,7 +191,7 @@ def test_w3_preflight_runs_exact_input_only_c1_to_c8_then_d1() -> None:
             assert forbidden not in prompt
 
 
-def test_w3_hashes_bind_new_prompt_and_preserve_w1_w2_transports() -> None:
+def test_w3_prompt_hashes_stay_frozen_while_current_system_uses_runtime_v2() -> None:
     assert hashlib.sha256(
         local_memory_compiler_w3_prompt_contract().encode()
     ).hexdigest() == (
@@ -227,7 +227,7 @@ def test_w3_hashes_bind_new_prompt_and_preserve_w1_w2_transports() -> None:
             w3_dataset_sha256=LOCAL_WRITER_W3_DATASET_SHA256,
             w3_reference_sha256=LOCAL_WRITER_W3_REFERENCE_SHA256,
         )
-        == "d8ded63957e4584aa35167cebdcaaf1d92fe33323dc3c9092f50933082c89f3a"
+        == "db2d51d9e8a70a9456a6f01808e453603a55ae8df7a1e5a1097583119c817c97"
     )
 
 

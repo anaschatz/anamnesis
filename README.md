@@ -150,6 +150,22 @@ scenario call. See the
 [W3-M2-T1 failure record](results/local_writer_w3_m2_t1_preflight_failure.md)
 and [provenance sidecar](results/local_writer_w3_m2_t1_preflight_failure.provenance.json).
 
+An additive architecture-v2 hardening track now addresses the concrete failure
+mechanisms without rewriting those frozen results. The compiler receives a
+closed, wire-aligned semantic state instead of reducer revisions; fact identity
+is collision-safe; dead or past triggers and semantic no-op updates are rejected;
+condition transitions are correctly baselined; units match exactly; and the
+execution ledger uses only store-derived causal evidence. An optional external
+vLLM adapter adds pinned JSON-schema constrained generation with independent
+JSON, wire, domain, reducer, finish-reason, and usage gates. A separate optional
+OpenMemory adapter provides namespaced retrospective recall only—its IDs and
+scores can never become Anamnesis truth, triggers, executions, or evidence.
+These changes define a new future experiment identity; they are not a rerun or
+reinterpretation of W1-W3. A live vLLM cell has not run because the current
+Apple M3 host and frozen Q4_K_M artifacts are not compatible with a faithful
+vLLM/vllm-metal transport-only comparison. See the
+[architecture comparison and integration contract](VLLM_OPENMEMORY_ARCHITECTURE.md).
+
 Both local latency sets are diagnostic only. In D0, the Ollama server was
 restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap
 pressure. In D1, all four tasks stayed in one process, whose prompt cache grew

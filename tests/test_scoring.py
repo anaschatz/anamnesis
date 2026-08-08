@@ -298,6 +298,26 @@ def test_incorrect_or_future_provenance_does_not_receive_credit(
     assert score.provenance_exact == 0
 
 
+def test_duplicate_provenance_citation_is_not_exact() -> None:
+    scenario = _standard_scenario("duplicate-provenance")
+    run = _run(
+        scenario,
+        [
+            _prediction(
+                day=4,
+                decision_event_id="due",
+                evidence_event_ids=["intent", "due", "due"],
+            )
+        ],
+    )
+
+    score = score_scenario(scenario, run)
+
+    assert (score.tp, score.fp, score.fn) == (1, 0, 0)
+    assert score.provenance_covered == 1
+    assert score.provenance_exact == 0
+
+
 def test_missing_provenance_does_not_invalidate_a_correct_action() -> None:
     scenario = _standard_scenario("missing-provenance")
     run = _run(

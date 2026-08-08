@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 
 import pytest
 from pydantic import ValidationError
 
+from anamnesis.local_wire import (
+    LocalActionTemplateWire,
+    LocalConditionWire,
+    LocalFactAssertionWire,
+)
 from anamnesis.memory import (
     ActionTemplate,
     AtTrigger,
@@ -176,6 +182,316 @@ def test_semantic_delta_failure_is_atomic_but_audited() -> None:
     assert memory.delta_audit[-1].accepted is False
 
 
+def test_validate_delta_is_a_side_effect_free_exact_reducer_dry_run() -> None:
+    memory = InMemoryAnamnesis()
+    current = event("create", "2026-01-01T09:00:00+00:00")
+    delta = MemoryDelta(mutations=(create_at_intent(),))
+    before_hash = memory.state_hash()
+
+    memory.validate_delta(current, delta)
+
+    assert memory.state_hash() == before_hash
+    assert not memory.events
+    assert not memory.intent_revisions
+    with pytest.raises(ValueError, match="missing or inactive"):
+        memory.validate_delta(
+            current,
+            MemoryDelta(
+                mutations=(
+                    UpdateIntent(
+                        intent_id="missing",
+                        action_template=create_at_intent().action_template,
+                    ),
+                )
+            ),
+        )
+    assert memory.state_hash() == before_hash
+
+
+def test_compiler_state_exposes_semantics_without_revision_internals() -> None:
+    memory = InMemoryAnamnesis()
+    current = event("create", "2026-01-01T09:00:00+00:00")
+    result = memory.ingest(
+        current,
+        MemoryDelta(
+            mutations=(
+                SetFact(
+                    key=FactKey(entity="assignment", attribute="submitted"),
+                    value=False,
+                ),
+                create_at_intent(),
+            )
+        ),
+    )
+    assert result.accepted
+
+    state = json.loads(memory.compiler_state())
+
+    assert state == {
+        "facts": [
+            {
+                "attribute": "submitted",
+                "entity": "assignment",
+                "unit": None,
+                "value": False,
+            }
+        ],
+        "intents": [
+            {
+                "action_template": {
+                    "kind": "reminder",
+                    "payload": {"subject": "submit the assignment"},
+                    "summary": "Submit assignment",
+                },
+                "blockers": [],
+                "intent_id": "assignment",
+                "required_conditions": [],
+                "trigger": {
+                    "at": "2026-01-02T09:00:00Z",
+                    "type": "at",
+                },
+            }
+        ],
+    }
+    serialized = memory.compiler_state()
+    for forbidden in (
+        "action_key",
+        "field_provenance",
+        "previous_revision_id",
+        "revision_id",
+        "source_event_id",
+        "status",
+        "valid_from",
+        "valid_to",
+    ):
+        assert forbidden not in serialized
+
+
+def test_fact_key_canonical_identity_cannot_collide_across_dotted_fields() -> None:
+    left = FactKey(entity="a.b", attribute="c")
+    right = FactKey(entity="a", attribute="b.c")
+
+    assert left.display == right.display == "a.b.c"
+    assert left.canonical != right.canonical
+
+    memory = InMemoryAnamnesis()
+    current = event("facts", "2026-01-01T09:00:00+00:00")
+    assert memory.ingest(
+        current,
+        MemoryDelta(
+            mutations=(
+                SetFact(key=left, value="left"),
+                SetFact(key=right, value="right"),
+            )
+        ),
+    ).accepted
+    assert len(memory.current_facts) == 2
+    assert (
+        memory.evaluate_condition(Condition(key=left, operator="eq", value="left"))
+        == TruthValue.TRUE
+    )
+    assert (
+        memory.evaluate_condition(Condition(key=right, operator="eq", value="right"))
+        == TruthValue.TRUE
+    )
+
+
+def test_compiler_state_fact_and_condition_shapes_are_local_wire_aligned() -> None:
+    memory = InMemoryAnamnesis()
+    key = FactKey(entity="weather.station", attribute="temperature")
+    current = event("create", "2026-01-01T09:00:00+00:00")
+    assert memory.ingest(
+        current,
+        MemoryDelta(
+            mutations=(
+                SetFact(key=key, value=18, unit="celsius"),
+                create_at_intent(
+                    required=(
+                        Condition(
+                            key=key,
+                            operator="gte",
+                            value=15,
+                            unit="celsius",
+                        ),
+                    ),
+                ),
+            )
+        ),
+    ).accepted
+
+    state = json.loads(memory.compiler_state())
+    fact = LocalFactAssertionWire.model_validate(state["facts"][0])
+    condition = LocalConditionWire.model_validate(
+        state["intents"][0]["required_conditions"][0]
+    )
+    template = LocalActionTemplateWire.model_validate(
+        state["intents"][0]["action_template"]
+    )
+
+    assert fact.to_domain() == SetFact(key=key, value=18, unit="celsius")
+    assert condition.to_domain() == Condition(
+        key=key,
+        operator="gte",
+        value=15,
+        unit="celsius",
+    )
+    assert template.to_domain() == create_at_intent().action_template
+
+
+@pytest.mark.parametrize(
+    "trigger_at",
+    ["2026-01-01T08:59:59+00:00", "2026-01-01T09:00:00+00:00"],
+)
+def test_create_rejects_nonfuture_at_trigger(trigger_at: str) -> None:
+    memory = InMemoryAnamnesis()
+    current = event("create", "2026-01-01T09:00:00+00:00")
+
+    result = memory.ingest(
+        current,
+        MemoryDelta(mutations=(create_at_intent(at=trigger_at),)),
+    )
+
+    assert not result.accepted
+    assert result.error == "at trigger must be strictly after its source event"
+    assert not memory.intent_revisions
+
+
+def test_update_rejects_nonfuture_at_trigger_atomically() -> None:
+    memory = InMemoryAnamnesis()
+    created = event("create", "2026-01-01T09:00:00+00:00")
+    assert memory.ingest(
+        created,
+        MemoryDelta(mutations=(create_at_intent(),)),
+    ).accepted
+    memory.select(created)
+    memory.commit(created, Decision())
+    updated = event("update", "2026-01-01T10:00:00+00:00")
+
+    result = memory.ingest(
+        updated,
+        MemoryDelta(
+            mutations=(
+                UpdateIntent(
+                    intent_id="assignment",
+                    trigger=AtTrigger(at=updated.at),
+                ),
+            )
+        ),
+    )
+
+    assert not result.accepted
+    assert result.error == "at trigger must be strictly after its source event"
+    assert memory.current_intents[0].revision == 1
+
+
+def test_update_rejects_semantic_noop_without_new_revision() -> None:
+    memory = InMemoryAnamnesis()
+    created = event("create", "2026-01-01T09:00:00+00:00")
+    original = create_at_intent()
+    assert memory.ingest(
+        created,
+        MemoryDelta(mutations=(original,)),
+    ).accepted
+    memory.select(created)
+    memory.commit(created, Decision())
+    updated = event("update", "2026-01-01T10:00:00+00:00")
+
+    result = memory.ingest(
+        updated,
+        MemoryDelta(
+            mutations=(
+                UpdateIntent(
+                    intent_id=original.intent_id,
+                    action_template=original.action_template,
+                ),
+            )
+        ),
+    )
+
+    assert not result.accepted
+    assert result.error == "intent update does not change active semantics"
+    assert len(memory.intent_revisions) == 1
+    assert memory.current_intents[0].revision == 1
+
+
+def test_recurring_trigger_rejects_ranges_larger_than_one_year() -> None:
+    with pytest.raises(ValidationError, match="cannot exceed 366 days"):
+        RecurringTrigger(
+            local_time="09:00:00",
+            weekdays=("monday",),
+            start_date="2026-01-01",
+            end_date="2027-01-03",
+            timezone="Europe/Athens",
+        )
+
+
+def test_create_rejects_recurring_contract_without_future_occurrence() -> None:
+    memory = InMemoryAnamnesis()
+    current = event("create", "2026-01-05T12:00:00+02:00")
+    recurrence = RecurringTrigger(
+        local_time="09:00:00",
+        weekdays=("monday",),
+        start_date="2026-01-05",
+        end_date="2026-01-05",
+        timezone="Europe/Athens",
+    )
+
+    result = memory.ingest(
+        current,
+        MemoryDelta(
+            mutations=(
+                CreateIntent(
+                    intent_id="past-recurrence",
+                    trigger=recurrence,
+                    action_template=ActionTemplate(
+                        payload={"subject": "check recurrence"},
+                        summary="Check recurrence",
+                    ),
+                ),
+            )
+        ),
+    )
+
+    assert not result.accepted
+    assert result.error == (
+        "recurring trigger has no valid occurrence after its source event"
+    )
+
+
+def test_create_rejects_condition_window_that_has_already_closed() -> None:
+    memory = InMemoryAnamnesis()
+    current = event("create", "2026-01-05T12:00:00+00:00")
+    key = FactKey(entity="permit", attribute="approved")
+    transition = ConditionTransitionTrigger(
+        active_from=dt("2026-01-01T09:00:00+00:00"),
+        active_until=current.at,
+    )
+
+    result = memory.ingest(
+        current,
+        MemoryDelta(
+            mutations=(
+                CreateIntent(
+                    intent_id="closed-window",
+                    trigger=transition,
+                    required_conditions=(
+                        Condition(key=key, operator="eq", value=True),
+                    ),
+                    action_template=ActionTemplate(
+                        payload={"subject": "check permit"},
+                        summary="Check permit",
+                    ),
+                ),
+            )
+        ),
+    )
+
+    assert not result.accepted
+    assert result.error == (
+        "condition trigger window must extend past its source event"
+    )
+
+
 def test_duplicate_targets_are_rejected_before_reducer() -> None:
     key = FactKey(entity="weather", attribute="temperature")
     with pytest.raises(ValidationError, match="duplicate fact mutation"):
@@ -321,7 +637,7 @@ def test_deadline_update_keeps_action_key_and_changes_only_field_provenance() ->
     assert len(selection.due_candidates) == 1
     candidate = selection.due_candidates[0]
     assert candidate.action_key == "create"
-    assert candidate.evidence_event_ids == ("create", "update")
+    assert candidate.evidence_event_ids == ("create", "update", "new-deadline")
 
 
 def test_successive_action_template_updates_retain_independent_leaf_sources() -> None:
@@ -400,7 +716,12 @@ def test_successive_action_template_updates_retain_independent_leaf_sources() ->
     memory.ingest(due, None)
     selection = memory.select(due)
     assert len(selection.due_candidates) == 1
-    assert selection.due_candidates[0].evidence_event_ids == ("e1", "e2", "e3")
+    assert selection.due_candidates[0].evidence_event_ids == (
+        "e1",
+        "e2",
+        "e3",
+        "due",
+    )
 
 
 def test_removed_action_leaf_remains_causal_as_an_active_tombstone() -> None:
@@ -446,7 +767,7 @@ def test_removed_action_leaf_remains_causal_as_an_active_tombstone() -> None:
     due = event("due", "2026-01-02T09:00:00+00:00", kind="clock_tick")
     memory.ingest(due, None)
     selection = memory.select(due)
-    assert selection.due_candidates[0].evidence_event_ids == ("e1", "e2")
+    assert selection.due_candidates[0].evidence_event_ids == ("e1", "e2", "due")
 
 
 def test_stored_payload_and_provenance_are_deeply_immutable() -> None:
@@ -554,7 +875,7 @@ def test_commit_executes_exact_candidate_then_prevents_duplicate() -> None:
         Decision(actions=[proposed(candidate, ["create", "invented-future"])]),
     )
     assert committed.executed_occurrence_ids == (candidate.occurrence_id,)
-    assert memory.executions[0].evidence_event_ids == ("create",)
+    assert memory.executions[0].evidence_event_ids == ("create", "due")
     assert memory.occurrence_revisions[-1].status == "executed"
 
     later = event("later", "2026-01-02T10:00:00+00:00", kind="clock_tick")
@@ -562,7 +883,28 @@ def test_commit_executes_exact_candidate_then_prevents_duplicate() -> None:
     assert len(memory.executions) == 1
 
 
-def test_same_key_emission_executes_even_when_payload_is_wrong() -> None:
+def test_unitless_condition_does_not_match_a_unit_bearing_fact() -> None:
+    memory = InMemoryAnamnesis()
+    key = FactKey(entity="tank", attribute="temperature")
+    current = event("temperature", "2026-01-01T09:00:00+00:00")
+    assert memory.ingest(
+        current,
+        MemoryDelta(mutations=(SetFact(key=key, value=20, unit="celsius"),)),
+    ).accepted
+
+    assert (
+        memory.evaluate_condition(Condition(key=key, operator="gte", value=18))
+        == TruthValue.UNKNOWN
+    )
+    assert (
+        memory.evaluate_condition(
+            Condition(key=key, operator="gte", value=18, unit="celsius")
+        )
+        == TruthValue.TRUE
+    )
+
+
+def test_wrong_payload_never_marks_due_occurrence_executed() -> None:
     memory = InMemoryAnamnesis()
     created = event("create", "2026-01-01T09:00:00+00:00")
     memory.ingest(created, MemoryDelta(mutations=(create_at_intent(),)))
@@ -579,10 +921,10 @@ def test_same_key_emission_executes_even_when_payload_is_wrong() -> None:
         evidence_event_ids=["create"],
     )
     result = memory.commit(due, Decision(actions=[wrong]))
-    assert result.executed_occurrence_ids == (candidate.occurrence_id,)
-    assert not result.expired_occurrence_ids
-    assert memory.occurrence_revisions[-1].status == "executed"
-    assert len(memory.executions) == 1
+    assert not result.executed_occurrence_ids
+    assert result.expired_occurrence_ids == (candidate.occurrence_id,)
+    assert memory.occurrence_revisions[-1].status == "expired"
+    assert not memory.executions
 
 
 def test_unemitted_due_occurrence_expires() -> None:
@@ -775,6 +1117,7 @@ def test_recurring_fact_key_template_is_occurrence_local() -> None:
     assert blocked_memory.occurrence_revisions[-1].evidence_event_ids == (
         "create",
         "tuesday-done",
+        "tuesday",
     )
     blocked_memory.commit(blocked_tuesday, Decision())
 
@@ -890,6 +1233,169 @@ def test_condition_transition_has_no_creation_ack_and_is_one_shot() -> None:
     assert len(memory.executions) == 1
 
 
+def test_condition_true_before_window_does_not_fire_on_window_entry() -> None:
+    memory = InMemoryAnamnesis()
+    key = FactKey(entity="permit", attribute="approved")
+    created = event("create", "2026-01-01T09:00:00+00:00")
+    transition = ConditionTransitionTrigger(
+        active_from=dt("2026-01-02T09:00:00+00:00"),
+        active_until=dt("2026-01-03T09:00:00+00:00"),
+    )
+    assert memory.ingest(
+        created,
+        MemoryDelta(
+            mutations=(
+                CreateIntent(
+                    intent_id="permit-alert",
+                    trigger=transition,
+                    required_conditions=(
+                        Condition(key=key, operator="eq", value=True),
+                    ),
+                    action_template=ActionTemplate(
+                        payload={"subject": "check permit approval"},
+                        summary="Check permit approval",
+                    ),
+                ),
+            )
+        ),
+    ).accepted
+    assert not memory.select(created).due_candidates
+    memory.commit(created, Decision())
+
+    approved = event("approved", "2026-01-01T12:00:00+00:00", kind="observation")
+    assert memory.ingest(
+        approved,
+        MemoryDelta(mutations=(SetFact(key=key, value=True),)),
+    ).accepted
+    assert not memory.select(approved).due_candidates
+    memory.commit(approved, Decision())
+
+    window_entry = event(
+        "window-entry",
+        "2026-01-02T09:00:00+00:00",
+        kind="clock_tick",
+    )
+    memory.ingest(window_entry, None)
+    assert not memory.select(window_entry).due_candidates
+
+
+def test_condition_contract_update_establishes_baseline_before_transition() -> None:
+    memory = InMemoryAnamnesis()
+    old_key = FactKey(entity="permit", attribute="approved")
+    new_key = FactKey(entity="inspection", attribute="passed")
+    transition = ConditionTransitionTrigger(
+        active_from=dt("2026-01-01T09:00:00+00:00"),
+        active_until=dt("2026-01-07T09:00:00+00:00"),
+    )
+    created = event("create", "2026-01-01T09:00:00+00:00")
+    assert memory.ingest(
+        created,
+        MemoryDelta(
+            mutations=(
+                SetFact(key=old_key, value=False),
+                SetFact(key=new_key, value=True),
+                CreateIntent(
+                    intent_id="permit-alert",
+                    trigger=transition,
+                    required_conditions=(
+                        Condition(key=old_key, operator="eq", value=True),
+                    ),
+                    action_template=ActionTemplate(
+                        payload={"subject": "check permit approval"},
+                        summary="Check permit approval",
+                    ),
+                ),
+            )
+        ),
+    ).accepted
+    assert not memory.select(created).due_candidates
+    memory.commit(created, Decision())
+
+    updated = event("update", "2026-01-02T09:00:00+00:00")
+    assert memory.ingest(
+        updated,
+        MemoryDelta(
+            mutations=(
+                UpdateIntent(
+                    intent_id="permit-alert",
+                    required_conditions=(
+                        Condition(key=new_key, operator="eq", value=True),
+                    ),
+                ),
+            )
+        ),
+    ).accepted
+    assert not memory.select(updated).due_candidates
+    memory.commit(updated, Decision())
+
+    false_event = event("false", "2026-01-03T09:00:00+00:00", kind="observation")
+    memory.ingest(
+        false_event,
+        MemoryDelta(mutations=(SetFact(key=new_key, value=False),)),
+    )
+    assert not memory.select(false_event).due_candidates
+    memory.commit(false_event, Decision())
+    true_event = event("true", "2026-01-04T09:00:00+00:00", kind="observation")
+    memory.ingest(
+        true_event,
+        MemoryDelta(mutations=(SetFact(key=new_key, value=True),)),
+    )
+    assert len(memory.select(true_event).due_candidates) == 1
+
+
+def test_action_template_update_does_not_hide_same_event_condition_transition() -> None:
+    memory = InMemoryAnamnesis()
+    key = FactKey(entity="job", attribute="ready")
+    transition = ConditionTransitionTrigger(
+        active_from=dt("2026-01-01T09:00:00+00:00"),
+        active_until=dt("2026-01-07T09:00:00+00:00"),
+    )
+    created = event("create", "2026-01-01T09:00:00+00:00")
+    assert memory.ingest(
+        created,
+        MemoryDelta(
+            mutations=(
+                SetFact(key=key, value=False),
+                CreateIntent(
+                    intent_id="job-alert",
+                    trigger=transition,
+                    required_conditions=(
+                        Condition(key=key, operator="eq", value=True),
+                    ),
+                    action_template=ActionTemplate(
+                        payload={"subject": "check job"},
+                        summary="Check job",
+                    ),
+                ),
+            )
+        ),
+    ).accepted
+    assert not memory.select(created).due_candidates
+    memory.commit(created, Decision())
+
+    transitioned = event("transition", "2026-01-02T09:00:00+00:00")
+    assert memory.ingest(
+        transitioned,
+        MemoryDelta(
+            mutations=(
+                SetFact(key=key, value=True),
+                UpdateIntent(
+                    intent_id="job-alert",
+                    action_template=ActionTemplate(
+                        payload={"subject": "notify job owner"},
+                        summary="Notify job owner",
+                    ),
+                ),
+            )
+        ),
+    ).accepted
+    selection = memory.select(transitioned)
+    assert len(selection.due_candidates) == 1
+    assert selection.due_candidates[0].action_template.payload == {
+        "subject": "notify job owner"
+    }
+
+
 def test_compact_view_contains_only_due_evidence_and_current_facts() -> None:
     memory = InMemoryAnamnesis()
     submitted = FactKey(entity="assignment", attribute="submitted")
@@ -917,13 +1423,13 @@ def test_compact_view_contains_only_due_evidence_and_current_facts() -> None:
     memory.ingest(due, None)
     selection = memory.select(due)
     candidate = selection.due_candidates[0]
-    assert candidate.evidence_event_ids == ("status", "create")
+    assert candidate.evidence_event_ids == ("status", "create", "due")
     assert [block.kind for block in selection.view.blocks] == [
         "due_candidate",
         "fact",
     ]
     assert "assignment.submitted" in selection.view.blocks[1].content
-    assert "due" not in candidate.evidence_event_ids
+    assert candidate.evidence_event_ids[-1] == "due"
 
 
 def test_deterministic_compiler_exposes_only_request_and_defaults_to_noop() -> None:

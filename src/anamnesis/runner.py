@@ -144,6 +144,7 @@ async def run_scenario(
                 raw_compiler_output=checkpoint_work.raw_compiler_output,
                 memory_delta_json=checkpoint_work.memory_delta_json,
                 memory_delta_accepted=checkpoint_work.memory_delta_accepted,
+                memory_delta_error=checkpoint_work.memory_delta_error,
                 state_sha256=(checkpoint_work.state_sha256 or selection.state_sha256),
                 due_candidate_ids=(
                     checkpoint_work.due_candidate_ids or selection.due_candidate_ids

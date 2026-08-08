@@ -468,6 +468,7 @@ class CheckpointAudit(StrictModel):
     raw_compiler_output: str | None = None
     memory_delta_json: str | None = None
     memory_delta_accepted: bool | None = None
+    memory_delta_error: str | None = None
     state_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     due_candidate_ids: list[str] = Field(default_factory=list)
     rendered_context_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -490,8 +491,12 @@ class CheckpointAudit(StrictModel):
                 raise ValueError("a skipped compiler cannot accept a memory delta")
             if self.memory_delta_json is not None:
                 raise ValueError("a skipped compiler cannot have a memory delta")
+            if self.memory_delta_error is not None:
+                raise ValueError("a skipped compiler cannot have a memory error")
             if self.compiler_parse_error:
                 raise ValueError("a skipped compiler cannot have a parse error")
+        if self.memory_delta_accepted is True and self.memory_delta_error is not None:
+            raise ValueError("an accepted memory delta cannot have an error")
         return self
 
 

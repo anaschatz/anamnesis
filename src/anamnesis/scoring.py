@@ -238,6 +238,8 @@ def _provenance_is_exact(
     expected: ExpectedAction,
     scenario: Scenario,
 ) -> bool:
+    if len(prediction.evidence_event_ids) != len(set(prediction.evidence_event_ids)):
+        return False
     cited = set(prediction.evidence_event_ids)
     visible_ids = {
         event.id for event in scenario.events if event.at <= prediction.emitted_at

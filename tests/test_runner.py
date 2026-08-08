@@ -24,6 +24,7 @@ from anamnesis.memory import (
     FactKey,
     MemoryDelta,
     SetFact,
+    UpdateIntent,
 )
 from anamnesis.runner import DecisionCall, DecisionRequest, run_scenario
 from anamnesis.schema import Decision, ProposedAction, Usage
@@ -235,6 +236,39 @@ def test_anamnesis_compiles_only_non_clock_events_and_accounts_all_calls() -> No
     assert "Structured memory view:" in model.requests[0].prompt
 
 
+def test_runner_records_rejected_memory_delta_reason() -> None:
+    scenario = scenario_one()
+    compiler = DeterministicCompiler(
+        {
+            "s01-e01": MemoryDelta(
+                mutations=(
+                    UpdateIntent(
+                        intent_id="missing",
+                        action_template=ActionTemplate(
+                            payload={"subject": "check missing intent"},
+                            summary="Check missing intent",
+                        ),
+                    ),
+                )
+            )
+        }
+    )
+
+    run = asyncio.run(
+        run_scenario(
+            scenario=scenario,
+            strategy=AnamnesisMemoryStrategy(compiler),
+            model=RecordingModel(),
+        )
+    )
+
+    first = run.checkpoints[0]
+    assert first.memory_delta_accepted is False
+    assert (
+        first.memory_delta_error == "cannot update missing or inactive intent: missing"
+    )
+
+
 def test_anamnesis_end_to_end_with_deterministic_fake_compiler() -> None:
     scenario = scenario_one()
     sent = FactKey(entity="statistics_assignment", attribute="sent")
@@ -274,4 +308,4 @@ def test_anamnesis_end_to_end_with_deterministic_fake_compiler() -> None:
     due_prompt = model.requests[6].prompt
     assert "DUE_CANDIDATE" in due_prompt
     assert '"action_key":"s01-e01"' in due_prompt
-    assert 'evidence=["s01-e01","s01-e05"]' in due_prompt
+    assert 'evidence=["s01-e01","s01-e05","s01-e07"]' in due_prompt
