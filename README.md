@@ -99,6 +99,20 @@ was run and no output repair or retry was attempted. See the
 [W1 preflight failure record](results/local_writer_w1_preflight_failure.md) and
 [SHA-256 provenance sidecar](results/local_writer_w1_preflight_failure.provenance.json).
 
+W2 then tested one narrowly preregistered change on a separately frozen and
+corrected 10-case writer set: unused optional payload slots must be omitted or
+`null`, never filled with empty strings, false values, empty collections, or
+placeholder zeroes. Its fresh four-call semantic preflight passed, and the
+scenario cell ran exactly once. The W1 filler failure did not recur—no optional
+action payload contained filler—but the writer gate failed: 4 domain-conversion
+invalid deltas, 1 store-invalid update, 41/46 accepted deltas, and replayed
+candidate TP=0, FP=3, FN=8. Headline scenario usage was 108,252 input and 4,554
+output tokens; provider API cost was exactly `$0.00`. W2 is rejected and will
+not be repaired or rerun on these cases. See the strict
+[W2 table](results/local_writer_w2.md), [CSV](results/local_writer_w2.csv),
+[forensic analysis](results/local_writer_w2_analysis.md), and
+[provenance sidecar](results/local_writer_w2.provenance.json).
+
 Both local latency sets are diagnostic only. In D0, the Ollama server was
 restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap
 pressure. In D1, all four tasks stayed in one process, whose prompt cache grew

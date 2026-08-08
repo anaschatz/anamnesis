@@ -35,6 +35,23 @@ writer scenarios from running. The accompanying
 source commit and exact ignored `.eval` bytes. This is a preflight rejection,
 not a scenario result or a hypothesis test.
 
+The follow-up [W2 writer diagnostic](local_writer_w2.md) is published with its
+[CSV](local_writer_w2.csv), [forensic analysis](local_writer_w2_analysis.md),
+and [provenance sidecar](local_writer_w2.provenance.json). W2 changed only the
+serialization rule for unused optional payload slots and used a new dataset
+frozen before the prompt. Its four-call semantic preflight passed, but its one
+authorized 10-scenario run failed the frozen writer gate: 4 parse/domain
+invalid deltas, 1 semantic/store-invalid delta, 41/46 accepted deltas, and
+candidate TP=0, FP=3, FN=8. W2 is development-only, is not hypothesis-test
+evidence, and does not authorize a run on the 35-scenario development set or a
+repaired rerun on the same cases.
+
+For this W2 publication, the exact frozen manifest, standalone preflight
+`.eval`, and measured `.eval` are deliberately tracked under
+`results/runs/local/writer_diagnostic_w2/` despite the directory's normal
+ignore policy. Their byte hashes are pinned in the provenance sidecar. The raw
+logs contain local absolute filesystem paths but no credentials or API secrets.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
