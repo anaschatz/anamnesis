@@ -27,6 +27,8 @@ from anamnesis.local_experiment import (
     LOCAL_W3_M2_PRICING_SHA256,
     LOCAL_W3_M2_PROTOCOL_PATH,
     LOCAL_W3_M2_PROTOCOL_SHA256,
+    LOCAL_W3_M2_T1_PROTOCOL_PATH,
+    LOCAL_W3_M2_T1_PROTOCOL_SHA256,
     LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_PATH,
     LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256,
     LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_PATH,
@@ -52,6 +54,8 @@ from anamnesis.local_runtime import (
     LOCAL_MODEL_PREFLIGHT_W2_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION,
     LOCAL_MODEL_PREFLIGHT_W3_M2_PURPOSE,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_T1_PURPOSE,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_T1_TASK_VERSION,
     LOCAL_MODEL_PREFLIGHT_W3_M2_TASK_VERSION,
     LOCAL_MODEL_PREFLIGHT_W3_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_W3_TASK_VERSION,
@@ -76,6 +80,9 @@ from anamnesis.local_runtime import (
     local_model_preflight_w3_m2_sample,
     local_model_preflight_w3_m2_scorer,
     local_model_preflight_w3_m2_solver,
+    local_model_preflight_w3_m2_t1_sample,
+    local_model_preflight_w3_m2_t1_scorer,
+    local_model_preflight_w3_m2_t1_solver,
     local_model_preflight_w3_sample,
     local_model_preflight_w3_scorer,
     local_model_preflight_w3_solver,
@@ -550,6 +557,63 @@ def local_model_preflight_w3_m2(
             "preflight_protocol_sha256": LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256,
             "model_artifact_sha256": LOCAL_W3_M2_OLLAMA_MANIFEST_SHA256,
             "model_only_protocol_sha256": LOCAL_W3_M2_PROTOCOL_SHA256,
+        },
+    )
+
+
+@task
+def local_model_preflight_w3_m2_t1(
+    ollama_models_dir: str | None = None,
+    seed: int = 101,
+) -> Task:
+    """One transport-only W3-M2 gate with Ollama thinking disabled."""
+
+    if seed != 101:
+        raise ValueError("local W3-M2-T1 preflight requires seed 101 exactly")
+    models_dir = _require_ollama_models_dir(ollama_models_dir)
+    _verify_installed_w3_m2_model(models_dir)
+    fixture_path = _repo_artifact_path(LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_PATH)
+    protocol_path = _repo_artifact_path(LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_PATH)
+    m2_protocol_path = _repo_artifact_path(LOCAL_W3_M2_PROTOCOL_PATH)
+    t1_protocol_path = _repo_artifact_path(LOCAL_W3_M2_T1_PROTOCOL_PATH)
+    expected_pins = (
+        (fixture_path, LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256),
+        (protocol_path, LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256),
+        (m2_protocol_path, LOCAL_W3_M2_PROTOCOL_SHA256),
+        (t1_protocol_path, LOCAL_W3_M2_T1_PROTOCOL_SHA256),
+    )
+    if any(
+        hashlib.sha256(path.read_bytes()).hexdigest() != expected
+        for path, expected in expected_pins
+    ):
+        raise ValueError("tracked W3-M2-T1 input differs from its frozen pin")
+    return Task(
+        dataset=[local_model_preflight_w3_m2_t1_sample()],
+        solver=local_model_preflight_w3_m2_t1_solver(str(fixture_path)),
+        scorer=local_model_preflight_w3_m2_t1_scorer(),
+        config=GenerateConfig(
+            temperature=0.0,
+            seed=seed,
+            cache=False,
+            max_retries=0,
+            max_connections=1,
+            adaptive_connections=False,
+            extra_body={"reasoning_effort": "none"},
+        ),
+        version=LOCAL_MODEL_PREFLIGHT_W3_M2_T1_TASK_VERSION,
+        metadata={
+            "purpose": LOCAL_MODEL_PREFLIGHT_W3_M2_T1_PURPOSE,
+            "track": "local_zero_api_cost",
+            "hypothesis_test_eligible": False,
+            "intervention": "transport_only",
+            "parent_cell": "W3-M2",
+            "transport_field": "reasoning_effort=none",
+            "pricing_config_sha256": ACTIVE_LOCAL_W3_M2_PRICING_SHA256,
+            "preflight_fixture_sha256": LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256,
+            "preflight_protocol_sha256": LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256,
+            "model_artifact_sha256": LOCAL_W3_M2_OLLAMA_MANIFEST_SHA256,
+            "model_only_protocol_sha256": LOCAL_W3_M2_PROTOCOL_SHA256,
+            "transport_protocol_sha256": LOCAL_W3_M2_T1_PROTOCOL_SHA256,
         },
     )
 

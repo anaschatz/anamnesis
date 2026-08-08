@@ -145,6 +145,8 @@ LOCAL_PREFLIGHT_W3_METADATA_KEY = "anamnesis.local_preflight_w3"
 LOCAL_PREFLIGHT_W3_STORE_KEY = "anamnesis.local_preflight_w3"
 LOCAL_PREFLIGHT_W3_M2_METADATA_KEY = "anamnesis.local_preflight_w3_m2"
 LOCAL_PREFLIGHT_W3_M2_STORE_KEY = "anamnesis.local_preflight_w3_m2"
+LOCAL_PREFLIGHT_W3_M2_T1_METADATA_KEY = "anamnesis.local_preflight_w3_m2_t1"
+LOCAL_PREFLIGHT_W3_M2_T1_STORE_KEY = "anamnesis.local_preflight_w3_m2_t1"
 LOCAL_MODEL_PREFLIGHT_TASK_VERSION = "local.0.1"
 LOCAL_MODEL_PREFLIGHT_PURPOSE = "local-model-semantic-preflight"
 LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION = "local.w2.0.1"
@@ -156,6 +158,9 @@ LOCAL_MODEL_PREFLIGHT_W3_SAMPLE_ID = "local-model-preflight-w3-v1"
 LOCAL_MODEL_PREFLIGHT_W3_M2_TASK_VERSION = "local.w3-m2.0.1"
 LOCAL_MODEL_PREFLIGHT_W3_M2_PURPOSE = "local-writer-w3-model-only-preflight"
 LOCAL_MODEL_PREFLIGHT_W3_M2_SAMPLE_ID = "local-model-preflight-w3-m2-v1"
+LOCAL_MODEL_PREFLIGHT_W3_M2_T1_TASK_VERSION = "local.w3-m2-t1.0.1"
+LOCAL_MODEL_PREFLIGHT_W3_M2_T1_PURPOSE = "local-writer-w3-model-transport-preflight"
+LOCAL_MODEL_PREFLIGHT_W3_M2_T1_SAMPLE_ID = "local-model-preflight-w3-m2-t1-v1"
 LOCAL_SCENARIO_TASK_VERSION = "local.0.1"
 LOCAL_SCENARIO_W3_TASK_VERSION = "local.w3.0.1"
 LOCAL_ZERO_MODEL_COST = ModelCost(
@@ -1944,6 +1949,16 @@ def local_model_preflight_w3_m2_sample() -> Sample:
     )
 
 
+def local_model_preflight_w3_m2_t1_sample() -> Sample:
+    """Return the transport-only M2 compatibility sample, never scenario data."""
+
+    return Sample(
+        id=LOCAL_MODEL_PREFLIGHT_W3_M2_T1_SAMPLE_ID,
+        input="Check W3-M2 with the frozen no-thinking transport intervention.",
+        target="pass",
+    )
+
+
 @solver
 def local_model_preflight_solver() -> Solver:
     """Standalone diagnostic gate that exposes failure instead of raising."""
@@ -2034,6 +2049,30 @@ def local_model_preflight_w3_m2_solver(fixture_path: str) -> Solver:
     return solve
 
 
+@solver
+def local_model_preflight_w3_m2_t1_solver(fixture_path: str) -> Solver:
+    """Run the frozen W3 gate under the T1 transport; expose failure exactly."""
+
+    fixture = load_local_w3_preflight_fixture(fixture_path)
+
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        if str(state.model) != LOCAL_W3_M2_OLLAMA_MODEL:
+            raise ValueError("W3-M2-T1 preflight requires the pinned M2 model")
+        model = LocalInspectDecisionModel(state, generate)
+        result = await run_local_model_preflight_w3(model, fixture=fixture)
+        state = model.state
+        serialized = result.model_dump(mode="json")
+        state.metadata[LOCAL_PREFLIGHT_W3_M2_T1_METADATA_KEY] = serialized
+        state.store.set(LOCAL_PREFLIGHT_W3_M2_T1_STORE_KEY, serialized)
+        state.output = ModelOutput.from_content(
+            model=model.name,
+            content=result.model_dump_json(),
+        )
+        return state
+
+    return solve
+
+
 @scorer(metrics=[])
 def local_model_preflight_scorer() -> Scorer:
     """Score local compatibility only, never reminder quality."""
@@ -2114,6 +2153,29 @@ def local_model_preflight_w3_m2_scorer() -> Scorer:
                 "W3 C1-C8,D1 passed with the frozen M2 local model"
                 if result.passed
                 else "the frozen M2 model failed one or more W3 checks"
+            ),
+        )
+
+    return score
+
+
+@scorer(metrics=[])
+def local_model_preflight_w3_m2_t1_scorer() -> Scorer:
+    """Score only the frozen W3 semantics under the T1 transport cell."""
+
+    async def score(state: TaskState, target: Target) -> Score:
+        result = LocalModelPreflightW3Result.model_validate_json(
+            state.output.completion
+        )
+        if result.model != LOCAL_W3_M2_OLLAMA_MODEL:
+            raise ValueError("W3-M2-T1 scorer received a different model")
+        return Score(
+            value=1 if result.passed else 0,
+            answer=result.model,
+            explanation=(
+                "W3 C1-C8,D1 passed with the frozen no-thinking transport"
+                if result.passed
+                else "the frozen T1 transport failed one or more W3 checks"
             ),
         )
 

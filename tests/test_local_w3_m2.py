@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import runpy
 from pathlib import Path
 
 import pytest
@@ -32,13 +33,21 @@ from anamnesis.local_experiment import (
     LOCAL_W3_M2_PRICING_SHA256,
     LOCAL_W3_M2_PROTOCOL_PATH,
     LOCAL_W3_M2_PROTOCOL_SHA256,
+    LOCAL_W3_M2_T1_PROTOCOL_PATH,
+    LOCAL_W3_M2_T1_PROTOCOL_SHA256,
     load_ollama_artifact_pin,
     validate_zero_api_pricing,
 )
-from anamnesis.local_preflight import validate_local_w3_m2_preflight_log
+from anamnesis.local_preflight import (
+    validate_local_w3_m2_preflight_log,
+    validate_local_w3_m2_t1_preflight_log,
+)
 from anamnesis.local_runtime import (
     LOCAL_MODEL_PREFLIGHT_W3_M2_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_W3_M2_SAMPLE_ID,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_T1_PURPOSE,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_T1_SAMPLE_ID,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_T1_TASK_VERSION,
     LOCAL_MODEL_PREFLIGHT_W3_M2_TASK_VERSION,
     LOCAL_OLLAMA_BASE_URL,
     LOCAL_OLLAMA_CONTEXT_LENGTH,
@@ -84,6 +93,10 @@ def test_w3_m2_artifacts_and_protocol_are_exactly_pinned() -> None:
     assert (
         hashlib.sha256((ROOT / LOCAL_W3_M2_PROTOCOL_PATH).read_bytes()).hexdigest()
         == LOCAL_W3_M2_PROTOCOL_SHA256
+    )
+    assert (
+        hashlib.sha256((ROOT / LOCAL_W3_M2_T1_PROTOCOL_PATH).read_bytes()).hexdigest()
+        == LOCAL_W3_M2_T1_PROTOCOL_SHA256
     )
 
 
@@ -180,7 +193,13 @@ def test_w3_m2_runs_the_unchanged_nine_case_semantic_gate() -> None:
     ]
 
 
-def _m2_event(prompt: str, schema, completion: str) -> ModelEvent:
+def _m2_event(
+    prompt: str,
+    schema,
+    completion: str,
+    *,
+    extra_body: dict | None = None,
+) -> ModelEvent:
     config = GenerateConfig(
         temperature=0.0,
         seed=101,
@@ -189,6 +208,7 @@ def _m2_event(prompt: str, schema, completion: str) -> ModelEvent:
         max_connections=1,
         adaptive_connections=False,
         response_schema=schema,
+        extra_body=extra_body,
     )
     request = openai_completion_params(
         LOCAL_W3_M2_OLLAMA_SERVICE_MODEL,
@@ -227,7 +247,7 @@ def _m2_event(prompt: str, schema, completion: str) -> ModelEvent:
     )
 
 
-def _valid_m2_log() -> tuple[EvalLog, dict]:
+def _valid_m2_log(*, t1: bool = False) -> tuple[EvalLog, dict]:
     fixture = load_local_w3_preflight_fixture(
         ROOT / "eval/preflight/local_writer_w3.v1.json"
     )
@@ -245,7 +265,12 @@ def _valid_m2_log() -> tuple[EvalLog, dict]:
         _local_decision_schema(LOCAL_W3_M2_OLLAMA_MODEL),
     ]
     events = [
-        _m2_event(prompt, schema, completion)
+        _m2_event(
+            prompt,
+            schema,
+            completion,
+            extra_body={"reasoning_effort": "none"} if t1 else None,
+        )
         for prompt, schema, completion in zip(
             prompts,
             schemas,
@@ -304,12 +329,22 @@ def _valid_m2_log() -> tuple[EvalLog, dict]:
         passed=True,
     )
     serialized = result.model_dump(mode="json")
+    sample_id = (
+        LOCAL_MODEL_PREFLIGHT_W3_M2_T1_SAMPLE_ID
+        if t1
+        else LOCAL_MODEL_PREFLIGHT_W3_M2_SAMPLE_ID
+    )
+    store_key = (
+        "anamnesis.local_preflight_w3_m2_t1"
+        if t1
+        else "anamnesis.local_preflight_w3_m2"
+    )
     sample = EvalSample.model_construct(
-        id=LOCAL_MODEL_PREFLIGHT_W3_M2_SAMPLE_ID,
+        id=sample_id,
         epoch=1,
         events=events,
-        metadata={"anamnesis.local_preflight_w3_m2": serialized},
-        store={"anamnesis.local_preflight_w3_m2": serialized},
+        metadata={store_key: serialized},
+        store={store_key: serialized},
         error=None,
         invalidation=None,
         error_retries=[],
@@ -319,26 +354,47 @@ def _valid_m2_log() -> tuple[EvalLog, dict]:
         ),
     )
     commit = "a" * 40
+    task_name = (
+        "local_model_preflight_w3_m2_t1" if t1 else "local_model_preflight_w3_m2"
+    )
+    task_version = (
+        LOCAL_MODEL_PREFLIGHT_W3_M2_T1_TASK_VERSION
+        if t1
+        else LOCAL_MODEL_PREFLIGHT_W3_M2_TASK_VERSION
+    )
+    purpose = (
+        LOCAL_MODEL_PREFLIGHT_W3_M2_T1_PURPOSE
+        if t1
+        else LOCAL_MODEL_PREFLIGHT_W3_M2_PURPOSE
+    )
+    metadata = {
+        "purpose": purpose,
+        "track": "local_zero_api_cost",
+        "hypothesis_test_eligible": False,
+        "pricing_config_sha256": LOCAL_W3_M2_PRICING_SHA256,
+        "preflight_fixture_sha256": (
+            "5628c3c1d7f8e1a5da43d6e567d55ac8e4fbabd8b9c4054325de6f4def1da30c"
+        ),
+        "preflight_protocol_sha256": (
+            "7f63c156a8af74ced2d5e5530b3e8083da95c7f46e14e1afafaaf864b3ce1915"
+        ),
+        "model_artifact_sha256": LOCAL_W3_M2_OLLAMA_MANIFEST_SHA256,
+        "model_only_protocol_sha256": LOCAL_W3_M2_PROTOCOL_SHA256,
+    }
+    if t1:
+        metadata.update(
+            intervention="transport_only",
+            parent_cell="W3-M2",
+            transport_field="reasoning_effort=none",
+            transport_protocol_sha256=LOCAL_W3_M2_T1_PROTOCOL_SHA256,
+        )
+    else:
+        metadata.update(intervention="model_only", parent_prompt_cell="W3")
     spec = EvalSpec.model_construct(
-        task="local_model_preflight_w3_m2",
-        task_registry_name="local_model_preflight_w3_m2",
-        task_version=LOCAL_MODEL_PREFLIGHT_W3_M2_TASK_VERSION,
-        metadata={
-            "purpose": LOCAL_MODEL_PREFLIGHT_W3_M2_PURPOSE,
-            "track": "local_zero_api_cost",
-            "hypothesis_test_eligible": False,
-            "intervention": "model_only",
-            "parent_prompt_cell": "W3",
-            "pricing_config_sha256": LOCAL_W3_M2_PRICING_SHA256,
-            "preflight_fixture_sha256": (
-                "5628c3c1d7f8e1a5da43d6e567d55ac8e4fbabd8b9c4054325de6f4def1da30c"
-            ),
-            "preflight_protocol_sha256": (
-                "7f63c156a8af74ced2d5e5530b3e8083da95c7f46e14e1afafaaf864b3ce1915"
-            ),
-            "model_artifact_sha256": LOCAL_W3_M2_OLLAMA_MANIFEST_SHA256,
-            "model_only_protocol_sha256": LOCAL_W3_M2_PROTOCOL_SHA256,
-        },
+        task=task_name,
+        task_registry_name=task_name,
+        task_version=task_version,
+        metadata=metadata,
         model=LOCAL_W3_M2_OLLAMA_MODEL,
         model_base_url=LOCAL_OLLAMA_BASE_URL,
         model_args={},
@@ -348,6 +404,7 @@ def _valid_m2_log() -> tuple[EvalLog, dict]:
             max_retries=0,
             max_connections=1,
             adaptive_connections=False,
+            extra_body={"reasoning_effort": "none"} if t1 else None,
         ),
         config=EvalConfig(
             max_samples=1,
@@ -392,3 +449,63 @@ def test_w3_m2_strict_log_validator_binds_model_and_task_identity() -> None:
             expected_git_commit="a" * 40,
             expected_pricing_sha256=LOCAL_W3_M2_PRICING_SHA256,
         )
+
+
+def test_w3_m2_t1_validator_requires_exact_no_thinking_transport() -> None:
+    log, fixture = _valid_m2_log(t1=True)
+    result = validate_local_w3_m2_t1_preflight_log(
+        log,
+        fixture=fixture,
+        expected_git_commit="a" * 40,
+        expected_pricing_sha256=LOCAL_W3_M2_PRICING_SHA256,
+    )
+    assert result.passed
+    first_event = next(
+        event for event in log.samples[0].events if isinstance(event, ModelEvent)
+    )
+    assert first_event.config.extra_body == {"reasoning_effort": "none"}
+    assert first_event.call is not None
+    assert first_event.call.request["extra_body"] == {"reasoning_effort": "none"}
+
+    first_event.config.extra_body = None
+    with pytest.raises(ValueError, match="unpinned generation settings"):
+        validate_local_w3_m2_t1_preflight_log(
+            log,
+            fixture=fixture,
+            expected_git_commit="a" * 40,
+            expected_pricing_sha256=LOCAL_W3_M2_PRICING_SHA256,
+        )
+    first_event.config.extra_body = {"reasoning_effort": "none"}
+    assert first_event.call is not None
+    first_event.call.request["extra_body"] = {"reasoning_effort": "low"}
+    with pytest.raises(ValueError, match="raw local request differs"):
+        validate_local_w3_m2_t1_preflight_log(
+            log,
+            fixture=fixture,
+            expected_git_commit="a" * 40,
+            expected_pricing_sha256=LOCAL_W3_M2_PRICING_SHA256,
+        )
+
+
+def test_w3_m2_t1_task_freezes_transport_without_changing_other_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = runpy.run_path("eval/anamnesis_local_eval.py")
+    task_factory = module["local_model_preflight_w3_m2_t1"]
+    monkeypatch.setitem(
+        task_factory.__wrapped__.__globals__,  # type: ignore[attr-defined]
+        "_verify_installed_w3_m2_model",
+        lambda _path: 1,
+    )
+    task = task_factory(ollama_models_dir=str(ROOT))
+    assert task_factory.__registry_info__.name == "local_model_preflight_w3_m2_t1"  # type: ignore[attr-defined]
+    assert task.version == LOCAL_MODEL_PREFLIGHT_W3_M2_T1_TASK_VERSION
+    assert task.config.temperature == 0.0
+    assert task.config.seed == 101
+    assert task.config.cache is False
+    assert task.config.max_retries == 0
+    assert task.config.max_connections == 1
+    assert task.config.adaptive_connections is False
+    assert task.config.extra_body == {"reasoning_effort": "none"}
+    assert task.metadata["intervention"] == "transport_only"
+    assert task.metadata["transport_protocol_sha256"] == LOCAL_W3_M2_T1_PROTOCOL_SHA256

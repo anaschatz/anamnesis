@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from anamnesis.experiment import ArtifactPin
 from anamnesis.local_experiment import (
     LOCAL_W3_M2_PROTOCOL_SHA256,
+    LOCAL_W3_M2_T1_PROTOCOL_SHA256,
     LOCAL_WRITER_W2_PREFLIGHT_FIXTURE_SHA256,
     LOCAL_WRITER_W3_PREFLIGHT_FIXTURE_SHA256,
     LOCAL_WRITER_W3_PREFLIGHT_PROTOCOL_SHA256,
@@ -29,6 +30,9 @@ from anamnesis.local_runtime import (
     LOCAL_MODEL_PREFLIGHT_W2_TASK_VERSION,
     LOCAL_MODEL_PREFLIGHT_W3_M2_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_W3_M2_SAMPLE_ID,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_T1_PURPOSE,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_T1_SAMPLE_ID,
+    LOCAL_MODEL_PREFLIGHT_W3_M2_T1_TASK_VERSION,
     LOCAL_MODEL_PREFLIGHT_W3_M2_TASK_VERSION,
     LOCAL_MODEL_PREFLIGHT_W3_PURPOSE,
     LOCAL_MODEL_PREFLIGHT_W3_SAMPLE_ID,
@@ -107,6 +111,7 @@ def _validate_local_model_event(
     seed: int,
     expected_model: str = LOCAL_OLLAMA_MODEL,
     expected_service_model: str = LOCAL_OLLAMA_SERVICE_MODEL,
+    expected_extra_body: Mapping[str, Any] | None = None,
 ) -> None:
     if event.model != expected_model:
         raise ValueError("preflight model event differs from the pinned local model")
@@ -133,14 +138,17 @@ def _validate_local_model_event(
         raise ValueError("local model event uses an unpinned response schema")
     effective_config = event.config.model_dump(mode="json", exclude_none=True)
     effective_config.pop("response_schema", None)
-    if effective_config != {
+    expected_config: dict[str, Any] = {
         "max_retries": 0,
         "max_connections": 1,
         "adaptive_connections": False,
         "temperature": 0.0,
         "seed": seed,
         "cache": False,
-    }:
+    }
+    if expected_extra_body is not None:
+        expected_config["extra_body"] = dict(expected_extra_body)
+    if effective_config != expected_config:
         raise ValueError("local model event uses unpinned generation settings")
 
     call = event.call
@@ -505,6 +513,7 @@ def validate_local_w3_preflight_model_events(
     seed: int = 101,
     expected_model: str = LOCAL_OLLAMA_MODEL,
     expected_service_model: str = LOCAL_OLLAMA_SERVICE_MODEL,
+    expected_extra_body: Mapping[str, Any] | None = None,
 ) -> Usage:
     """Validate exactly C1-C8,D1 and return aggregate setup usage."""
 
@@ -544,6 +553,7 @@ def validate_local_w3_preflight_model_events(
             seed=seed,
             expected_model=expected_model,
             expected_service_model=expected_service_model,
+            expected_extra_body=expected_extra_body,
         )
         usage = _local_usage_from_output(event.output)
         if usage.input_tokens <= 0 or usage.output_tokens <= 0:
@@ -569,6 +579,7 @@ def validate_local_w3_preflight_model_events(
         seed=seed,
         expected_model=expected_model,
         expected_service_model=expected_service_model,
+        expected_extra_body=expected_extra_body,
     )
     decision_usage = _local_usage_from_output(decision_event.output)
     if decision_usage.input_tokens <= 0 or decision_usage.output_tokens <= 0:
@@ -604,6 +615,7 @@ def validate_local_w3_preflight_log(
     expected_sample_id: str = LOCAL_MODEL_PREFLIGHT_W3_SAMPLE_ID,
     expected_store_key: str = "anamnesis.local_preflight_w3",
     expected_metadata_extra: Mapping[str, Any] | None = None,
+    expected_extra_body: Mapping[str, Any] | None = None,
 ) -> LocalModelPreflightW3Result:
     """Validate the exact nine-call frozen W3 standalone preflight log."""
 
@@ -636,14 +648,17 @@ def validate_local_w3_preflight_log(
     effective_model_config = spec.model_generate_config.merge(
         log.plan.config
     ).model_dump(mode="json", exclude_none=True)
-    if effective_model_config != {
+    expected_model_config: dict[str, Any] = {
         "max_retries": 0,
         "max_connections": 1,
         "adaptive_connections": False,
         "temperature": 0.0,
         "seed": seed,
         "cache": False,
-    }:
+    }
+    if expected_extra_body is not None:
+        expected_model_config["extra_body"] = dict(expected_extra_body)
+    if effective_model_config != expected_model_config:
         raise ValueError("local W3 preflight model configuration differs from the pin")
     revision = spec.revision
     revision_commit = revision.commit if revision is not None else None
@@ -694,6 +709,7 @@ def validate_local_w3_preflight_log(
         seed=seed,
         expected_model=expected_model,
         expected_service_model=expected_service_model,
+        expected_extra_body=expected_extra_body,
     )
     return result
 
@@ -729,6 +745,43 @@ def validate_local_w3_m2_preflight_log(
             ),
             "model_only_protocol_sha256": LOCAL_W3_M2_PROTOCOL_SHA256,
         },
+    )
+
+
+def validate_local_w3_m2_t1_preflight_log(
+    log: EvalLog,
+    *,
+    fixture: Mapping[str, Any],
+    expected_git_commit: str,
+    expected_pricing_sha256: str,
+    seed: int = 101,
+) -> LocalModelPreflightW3Result:
+    """Validate the exact W3-M2 transport-only no-thinking preflight."""
+
+    return validate_local_w3_preflight_log(
+        log,
+        fixture=fixture,
+        expected_git_commit=expected_git_commit,
+        expected_pricing_sha256=expected_pricing_sha256,
+        seed=seed,
+        expected_model=LOCAL_W3_M2_OLLAMA_MODEL,
+        expected_service_model=LOCAL_W3_M2_OLLAMA_SERVICE_MODEL,
+        expected_task="local_model_preflight_w3_m2_t1",
+        expected_task_version=LOCAL_MODEL_PREFLIGHT_W3_M2_T1_TASK_VERSION,
+        expected_purpose=LOCAL_MODEL_PREFLIGHT_W3_M2_T1_PURPOSE,
+        expected_sample_id=LOCAL_MODEL_PREFLIGHT_W3_M2_T1_SAMPLE_ID,
+        expected_store_key="anamnesis.local_preflight_w3_m2_t1",
+        expected_metadata_extra={
+            "intervention": "transport_only",
+            "parent_cell": "W3-M2",
+            "transport_field": "reasoning_effort=none",
+            "model_artifact_sha256": (
+                "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+            ),
+            "model_only_protocol_sha256": LOCAL_W3_M2_PROTOCOL_SHA256,
+            "transport_protocol_sha256": LOCAL_W3_M2_T1_PROTOCOL_SHA256,
+        },
+        expected_extra_body={"reasoning_effort": "none"},
     )
 
 
@@ -887,4 +940,5 @@ __all__ = [
     "validate_local_w3_preflight_artifact",
     "validate_local_w3_preflight_log",
     "validate_local_w3_preflight_model_events",
+    "validate_local_w3_m2_t1_preflight_log",
 ]
