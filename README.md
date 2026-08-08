@@ -113,6 +113,19 @@ not be repaired or rerun on these cases. See the strict
 [forensic analysis](results/local_writer_w2_analysis.md), and
 [provenance sidecar](results/local_writer_w2.provenance.json).
 
+W3 bundled the remaining compiler repairs into a new prompt, froze a fourth
+blind 10-case writer set before that prompt, and froze a neutral nine-call
+semantic fixture afterward. Its one authorized preflight failed, so the
+scenario set was never evaluated. C5 (stable-ID trigger update), C7 (complete
+sparse payload including an explicit zero), and D1 (no action) passed; C2/C4
+failed domain conversion, while C1/C3/C6/C8 were schema-valid but semantically
+wrong. Aggregate usage was 17,326 input and 1,044 output tokens at exactly
+`$0.00` provider API cost. W3 is rejected at preflight, with no retry, repair,
+manifest freeze, or measured scenario log. Per the frozen stopping rule, no W4
+will be tuned on the v4 cases. See the
+[W3 failure record](results/local_writer_w3_preflight_failure.md) and
+[provenance sidecar](results/local_writer_w3_preflight_failure.provenance.json).
+
 Both local latency sets are diagnostic only. In D0, the Ollama server was
 restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap
 pressure. In D1, all four tasks stayed in one process, whose prompt cache grew

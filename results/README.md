@@ -46,11 +46,26 @@ candidate TP=0, FP=3, FN=8. W2 is development-only, is not hypothesis-test
 evidence, and does not authorize a run on the 35-scenario development set or a
 repaired rerun on the same cases.
 
+The bundled [W3 semantic preflight](local_writer_w3_preflight_failure.md) was
+then run exactly once against a fourth blind writer set and stopped before all
+scenario evaluation. Only C5 (stable-ID trigger update), C7 (complete sparse
+payload), and D1 (no action) passed. C2/C4 failed domain conversion and
+C1/C3/C6/C8 were schema-valid but semantically wrong. The accompanying
+[provenance sidecar](local_writer_w3_preflight_failure.provenance.json) binds
+the 9-call raw `.eval`, contracts, usage, and clean source commit. W3 is
+rejected at preflight; no W3 manifest or measured result exists, and no W4 may
+be tuned on the v4 cases.
+
 For this W2 publication, the exact frozen manifest, standalone preflight
 `.eval`, and measured `.eval` are deliberately tracked under
 `results/runs/local/writer_diagnostic_w2/` despite the directory's normal
 ignore policy. Their byte hashes are pinned in the provenance sidecar. The raw
 logs contain local absolute filesystem paths but no credentials or API secrets.
+
+The exact W3 preflight `.eval` is likewise tracked under
+`results/runs/local/writer_diagnostic_w3/`. It contains local absolute paths
+but no credentials or API secrets. There is deliberately no W3 experiment
+manifest or scenario log because the semantic gate failed.
 
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
