@@ -126,6 +126,17 @@ will be tuned on the v4 cases. See the
 [W3 failure record](results/local_writer_w3_preflight_failure.md) and
 [provenance sidecar](results/local_writer_w3_preflight_failure.provenance.json).
 
+A separately preregistered W3-M2 model-only cell then kept the full W3
+prompt/schema/fixture contract unchanged and replaced only the local model with
+the byte-pinned `ollama/qwen3.5:9b-q4_K_M` (Qwen35 9.7B, Q4_K_M). The artifact
+fit and ran locally on the Apple M3, but all eight compiler calls exhausted the
+4096-token context and produced no parseable completion. D1 no-action passed.
+The single nine-call run used 18,865 input and 15,856 output tokens at exactly
+`$0.00` provider API cost. W3-M2 is rejected at preflight and no scenario set
+was created or evaluated. See the
+[W3-M2 failure record](results/local_writer_w3_m2_preflight_failure.md) and
+[provenance sidecar](results/local_writer_w3_m2_preflight_failure.provenance.json).
+
 Both local latency sets are diagnostic only. In D0, the Ollama server was
 restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap
 pressure. In D1, all four tasks stayed in one process, whose prompt cache grew

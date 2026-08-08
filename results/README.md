@@ -56,6 +56,15 @@ the 9-call raw `.eval`, contracts, usage, and clean source commit. W3 is
 rejected at preflight; no W3 manifest or measured result exists, and no W4 may
 be tuned on the v4 cases.
 
+The follow-up [W3-M2 model-only preflight](local_writer_w3_m2_preflight_failure.md)
+kept the W3 prompt, schemas, fixture, and execution policy fixed and changed
+only the pinned local model to Qwen35 9.7B Q4_K_M. The artifact loaded and ran
+locally, but all eight compiler calls ended at `max_tokens` with no parseable
+completion; only D1 no-action passed. The accompanying
+[provenance sidecar](local_writer_w3_m2_preflight_failure.provenance.json)
+binds the clean source commit and exact nine-call `.eval`. W3-M2 is rejected,
+and no scenario dataset, manifest, or measured scenario log exists for it.
+
 For this W2 publication, the exact frozen manifest, standalone preflight
 `.eval`, and measured `.eval` are deliberately tracked under
 `results/runs/local/writer_diagnostic_w2/` despite the directory's normal
@@ -66,6 +75,10 @@ The exact W3 preflight `.eval` is likewise tracked under
 `results/runs/local/writer_diagnostic_w3/`. It contains local absolute paths
 but no credentials or API secrets. There is deliberately no W3 experiment
 manifest or scenario log because the semantic gate failed.
+
+The exact W3-M2 preflight `.eval` is tracked under
+`results/runs/local/writer_w3_m2/`. It contains local absolute paths but no
+credentials or API secrets. There is deliberately no W3-M2 scenario artifact.
 
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
