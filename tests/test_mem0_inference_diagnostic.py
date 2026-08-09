@@ -16,6 +16,7 @@ from anamnesis.mem0_inference_diagnostic import (
     _canonical_sha256,
     _load_protocol,
     _loopback_only,
+    _require_local_environment,
     _verify_ollama_artifact,
     evaluate_assertion,
 )
@@ -24,6 +25,22 @@ from anamnesis.mem0_inference_diagnostic import (
 def test_runtime_source_attests_resident_context_length() -> None:
     source = Path("src/anamnesis/mem0_inference_diagnostic.py").read_text()
     assert 'resident[0].get("context_length") != model["context_length"]' in source
+
+
+def test_runtime_requires_all_five_local_environment_pins(monkeypatch) -> None:
+    expected = {
+        "OLLAMA_NO_CLOUD": "1",
+        "OLLAMA_HOST": "127.0.0.1:11434",
+        "OLLAMA_CONTEXT_LENGTH": "8192",
+        "OLLAMA_NUM_PARALLEL": "1",
+        "OLLAMA_MAX_LOADED_MODELS": "1",
+    }
+    for name, value in expected.items():
+        monkeypatch.setenv(name, value)
+    _require_local_environment()
+    monkeypatch.setenv("OLLAMA_NO_CLOUD", "0")
+    with pytest.raises(RuntimeError, match="OLLAMA_NO_CLOUD=1"):
+        _require_local_environment()
 
 
 @pytest.mark.parametrize(

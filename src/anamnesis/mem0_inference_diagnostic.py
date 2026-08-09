@@ -227,6 +227,19 @@ def _load_protocol(path: Path) -> dict[str, Any]:
     return value
 
 
+def _require_local_environment() -> None:
+    expected = {
+        "OLLAMA_NO_CLOUD": "1",
+        "OLLAMA_HOST": "127.0.0.1:11434",
+        "OLLAMA_CONTEXT_LENGTH": "8192",
+        "OLLAMA_NUM_PARALLEL": "1",
+        "OLLAMA_MAX_LOADED_MODELS": "1",
+    }
+    for name, value in expected.items():
+        if os.environ.get(name) != value:
+            raise RuntimeError(f"Mem0 inference requires {name}={value}")
+
+
 def _verify_ollama_artifact(protocol: Mapping[str, Any], models_root: Path) -> None:
     model = protocol["model"]
     manifest = (
@@ -528,6 +541,7 @@ async def run_mem0_inference_diagnostic(
     source_commit: str,
 ) -> Mem0InferenceResult:
     protocol = _load_protocol(protocol_path)
+    _require_local_environment()
     if len(source_commit) != 40:
         raise RuntimeError("Mem0 inference source commit must be full length")
     from anamnesis.baselines import _directory_sha256
