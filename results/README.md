@@ -165,6 +165,17 @@ error in both arms rather than a memory regression. The
 [provenance sidecar](local_openmemory_vllm_v7.provenance.json) bind the tracked
 raw run.
 
+The separate [real OpenMemory SDK contract smoke](local_openmemory_sdk_v1.3.0.md)
+then exercised the official CaviraOSS Python SDK `v1.3.0` through the production
+Anamnesis recall adapter. One local `add -> search -> get -> delete` lifecycle
+passed with exact source-byte, scope, content, deletion, and non-authoritative
+boundary checks. The [machine-readable result](local_openmemory_sdk_v1.3.0.json)
+contains no provider identifiers or local paths, and its
+[provenance sidecar](local_openmemory_sdk_v1.3.0.provenance.json) binds the
+source, SDK, runtime, and result bytes. This is SDK compatibility evidence, not
+a recall-quality benchmark; it also records the undeclared upstream dependencies
+needed to make the tagged package runnable.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final

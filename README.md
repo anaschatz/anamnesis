@@ -228,6 +228,19 @@ otherwise correct subject; it was not a memory failure. See the
 [analysis](results/local_openmemory_vllm_v7_analysis.md), and
 [provenance sidecar](results/local_openmemory_vllm_v7.provenance.json).
 
+The real upstream CaviraOSS OpenMemory Python SDK has now also passed a separate
+byte-pinned lifecycle smoke through the same non-authoritative adapter:
+scope-verified `add`, exact semantic `search`, exact opaque-handle `get`, and
+verified `delete` all succeeded locally with synthetic embeddings and SQLite.
+This closes the gap between our fake/upstream-shaped contract tests and the
+actual SDK. It also exposed a real packaging weakness in OpenMemory `v1.3.0`:
+multiple imported dependencies, including the migration-time `setuptools`
+requirement, are absent from its declared package dependencies. See the
+[real-SDK diagnostic](results/local_openmemory_sdk_v1.3.0.md) and
+[machine-readable result](results/local_openmemory_sdk_v1.3.0.json); its
+[provenance sidecar](results/local_openmemory_sdk_v1.3.0.provenance.json) binds
+the exact source, SDK, runtime, and output bytes.
+
 Both local latency sets are diagnostic only. In D0, the Ollama server was
 restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap
 pressure. In D1, all four tasks stayed in one process, whose prompt cache grew
