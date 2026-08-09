@@ -1,0 +1,135 @@
+{
+  "schema_version": "mem0_inference_protocol.v1",
+  "purpose": "automatic_fact_extraction_and_dedup_diagnostic",
+  "hypothesis_test_eligible": false,
+  "preregistered_before_model_calls": true,
+  "upstream": {
+    "repository": "https://github.com/mem0ai/mem0",
+    "tag": "v2.0.17",
+    "revision": "12c47f524935692e27ad48d829f35fa1e4417181",
+    "python_source_tree_sha256": "093b1a78ff701bae381e27d6c7a8b5a1d0db5240942a3ea7134fb12966445d61"
+  },
+  "model": {
+    "provider": "ollama_local",
+    "name": "qwen3.5:9b-q4_K_M",
+    "manifest_sha256": "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+    "model_blob_sha256": "dec52a44569a2a25341c4e4d3fee25846eed4f6f0b936278e3a3c900bb99d37c",
+    "model_blob_bytes": 6594462816,
+    "ollama_version": "0.31.1",
+    "ollama_python_version": "0.6.1",
+    "base_url": "http://127.0.0.1:11434",
+    "context_length": 8192,
+    "seed": 101,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "top_k": 1,
+    "max_output_tokens": 1024,
+    "retries": 0,
+    "repairs": 0,
+    "cache": false
+  },
+  "storage": {
+    "vector_store": "qdrant_embedded",
+    "embedding_repository": "qdrant/bge-small-en-v1.5-onnx-q",
+    "embedding_revision": "52398278842ec682c6f32300af41344b1c0b0bb2",
+    "embedding_artifact_sha256": "d435d05b3411502ad9a280cc9ac0157f7bcd9f176df2fdc8971f788a121a02d7",
+    "telemetry": false,
+    "provider_api_cost_usd": 0.0
+  },
+  "scope_a": {
+    "user_id": "mem0-infer-user-a",
+    "session_id": "mem0-infer-session-a",
+    "project_id": "mem0-infer-project"
+  },
+  "scope_b": {
+    "user_id": "mem0-infer-user-b",
+    "session_id": "mem0-infer-session-b",
+    "project_id": "mem0-infer-project"
+  },
+  "events": [
+    {
+      "id": "mi1-e1",
+      "scope": "a",
+      "text": "I prefer quarterly reports in Greek.",
+      "assertion": {
+        "type": "contains_fact",
+        "required_terms": ["quarterly", "reports", "Greek"]
+      }
+    },
+    {
+      "id": "mi1-e2",
+      "scope": "a",
+      "text": "For quarterly reports, Greek is my preferred language.",
+      "assertion": {
+        "type": "deduplicated_fact",
+        "required_terms": ["quarterly", "reports", "Greek"],
+        "matching_record_count": 1
+      }
+    },
+    {
+      "id": "mi1-e3",
+      "scope": "a",
+      "text": "I now prefer quarterly reports in English, not Greek.",
+      "assertion": {
+        "type": "corrected_fact",
+        "required_terms": ["quarterly", "reports", "English"],
+        "forbidden_active_terms": ["prefer", "quarterly", "reports", "Greek"],
+        "matching_record_count": 1
+      }
+    },
+    {
+      "id": "mi1-e4",
+      "scope": "a",
+      "text": "I need to submit the Argo permit on 2043-05-17.",
+      "assertion": {
+        "type": "contains_fact",
+        "required_terms": ["submit", "Argo", "permit", "2043-05-17"]
+      }
+    },
+    {
+      "id": "mi1-e5",
+      "scope": "a",
+      "text": "The Argo permit submission is cancelled; I no longer need to submit it.",
+      "assertion": {
+        "type": "cancelled_or_absent",
+        "subject_terms": ["Argo", "permit"],
+        "active_obligation_terms": ["need", "submit"],
+        "cancellation_terms": ["cancelled", "canceled", "no longer"]
+      }
+    },
+    {
+      "id": "mi1-e6",
+      "scope": "a",
+      "text": "Maybe I could visit the amber museum someday.",
+      "assertion": {
+        "type": "no_hard_obligation",
+        "subject_terms": ["amber", "museum"],
+        "hard_obligation_terms": ["must", "need", "will", "scheduled", "due"]
+      }
+    },
+    {
+      "id": "mi1-e7",
+      "scope": "b",
+      "text": "I prefer quarterly reports in Japanese.",
+      "assertion": {
+        "type": "contains_fact",
+        "required_terms": ["quarterly", "reports", "Japanese"]
+      }
+    }
+  ],
+  "global_assertions": {
+    "scope_a_forbidden_terms": ["Japanese"],
+    "scope_b_forbidden_terms": ["Greek", "English", "Argo", "amber museum"],
+    "provider_ids_are_opaque": true,
+    "action_evidence_ids_are_empty": true,
+    "cleanup_all_scopes": true,
+    "usage_and_latency_complete": true
+  },
+  "stopping_rule": {
+    "attempts": 1,
+    "on_integrity_failure": "stop_without_interpreting_metrics",
+    "on_valid_result": "publish_all_event_results_and_stop",
+    "prompt_tuning_on_v1_events": false,
+    "next_prompt_requires_new_events": true
+  }
+}
