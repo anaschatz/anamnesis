@@ -180,10 +180,18 @@ but 12/16 responses violated the closed response schema. V3 therefore also
 failed, isolating structured-output enforcement as the next bottleneck. See the
 [v3 record](results/local_openmemory_diagnostic_v3.md) and
 [provenance sidecar](results/local_openmemory_diagnostic_v3.provenance.json).
-These changes define a new future experiment identity; they are not a rerun or
-reinterpretation of W1-W3. A live vLLM cell has not run because the current
-Apple M3 host and frozen Q4_K_M artifacts are not compatible with a faithful
-vLLM/vllm-metal transport-only comparison. See the
+These changes define a new experiment identity; they are not a rerun or
+reinterpretation of W1-W3. A fresh v4 cell has now run with an immutable
+Qwen3.5 4B MLX artifact because the prior Q4_K_M bytes are incompatible with
+vllm-metal. The explicitly pinned xgrammar backend and neutral canary worked,
+and recall caused no safety or evidence contamination regression. The gate
+still failed: six measured calls repeated a schema-allowed action object until
+the 256-token limit, and one more passed JSON/wire validation but failed a
+domain subject invariant. Baseline and recall each scored 4/8 with zero helpful
+gain. This isolates a JSON-Schema-to-domain alignment weakness, not a vLLM
+transport failure, and it is not a causal comparison with Ollama. See the
+[strict v4 result](results/local_openmemory_vllm_v4.md),
+[forensic analysis](results/local_openmemory_vllm_v4_analysis.md), and
 [architecture comparison and integration contract](VLLM_OPENMEMORY_ARCHITECTURE.md).
 
 Both local latency sets are diagnostic only. In D0, the Ollama server was

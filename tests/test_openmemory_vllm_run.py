@@ -207,7 +207,9 @@ def test_report_labels_joint_cell_and_setup_exclusion(monkeypatch) -> None:
     )
     row = report_module._row(result)
     markdown = report_module._markdown_bytes(row).decode()
+    csv_bytes = report_module._csv_bytes(row)
 
+    assert b"\r" not in csv_bytes
     assert "joint model-artifact + structured-runtime" in markdown
     assert "not a causal comparison with Ollama" in markdown
     assert "Setup tokens (input/output, excluded)" in markdown

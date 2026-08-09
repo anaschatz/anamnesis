@@ -71,6 +71,9 @@ def _verify_reporting_checkout(measurement_commit: str) -> str:
         ).stdout.splitlines()
     )
     allowed = {
+        "README.md",
+        "results/README.md",
+        "results/local_openmemory_vllm_v4_analysis.md",
         "src/anamnesis/openmemory_vllm_report.py",
         "tests/test_openmemory_vllm_run.py",
     }
@@ -171,7 +174,7 @@ def _row(result: OpenMemoryVllmV4Run) -> dict[str, object]:
 
 def _csv_bytes(row: dict[str, object]) -> bytes:
     stream = io.StringIO(newline="")
-    writer = csv.DictWriter(stream, fieldnames=list(row))
+    writer = csv.DictWriter(stream, fieldnames=list(row), lineterminator="\n")
     writer.writeheader()
     writer.writerow(row)
     return stream.getvalue().encode()

@@ -117,6 +117,21 @@ recall safety or evidence regression. Its
 [provenance sidecar](local_openmemory_diagnostic_v3.provenance.json) pins the
 unpublished raw log and exact source contract.
 
+The fresh [OpenMemory + vLLM v4 diagnostic](local_openmemory_vllm_v4.md)
+then used an immutable Qwen3.5 4B MLX artifact and an explicitly pinned
+xgrammar backend. The neutral canary passed, all no-action safety cases were
+correct, and recall caused no safety or evidence contamination regression.
+The overall gate nevertheless failed: 6/16 measured calls repeated an allowed
+action object until the 256-token limit, and one additional call passed JSON
+and wire validation but failed the stricter domain subject invariant. Baseline
+and recall each scored 4/8 with zero helpful gain. The
+[forensic analysis](local_openmemory_vllm_v4_analysis.md),
+[CSV](local_openmemory_vllm_v4.csv), and
+[provenance sidecar](local_openmemory_vllm_v4.provenance.json) bind the exact
+tracked 17-call raw artifact. V4 identifies a JSON-Schema-to-domain alignment
+gap; it is not a causal comparison with Ollama and cannot be rerun or repaired
+on the same cases.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
