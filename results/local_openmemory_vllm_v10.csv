@@ -1,0 +1,2 @@
+passed,cases,retrieval_correct,cleanup_verified,baseline_correct,recall_correct,helpful_gain,safety_regressions,accepted_calls,canonicalizer_changes,input_tokens,output_tokens,provider_api_cost_usd
+true,12,12,12,4,10,5,0,24,15,11179,2558,0.0

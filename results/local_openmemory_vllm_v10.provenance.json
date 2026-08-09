@@ -1,0 +1,42 @@
+{
+  "hypothesis_test_eligible": false,
+  "inputs": {
+    "fixture": {
+      "path": "eval/openmemory/real_sdk_generalization_v1.json",
+      "sha256": "a3be7d7cfedf25eac3687465090137e38155fa93f7d1ca1ec9d60421f414bb86"
+    },
+    "pin": {
+      "path": "eval/openmemory/real_sdk_generalization_v1.pin.json",
+      "sha256": "13f7f5fc0fd939b28ec910e2dd953ff94a5f447c047d6f6be6adf3341f62dbae"
+    },
+    "run": {
+      "path": "results/runs/local/openmemory_vllm_v10/run.json",
+      "sha256": "ee69a766f85afcde47ae9310144484e32f03440abfe3046abf4fc9d44885b01a"
+    },
+    "sdk_pin": {
+      "path": "eval/openmemory_sdk_v1.3.0.pin.json",
+      "sha256": "9d42b1446e5dab7b85fe13c3ef85a3c4b1e61eba406354a1f451f67be531b91c"
+    }
+  },
+  "openmemory": {
+    "authoritative": false,
+    "runtime_packages_sha256": "1d8f955c20442703f75b92e3baf1bea6a65a84696dca50698a1f6877cf24e533",
+    "scoped_cleanup_verified": 12,
+    "source_tree_sha256": "434a82caaced7548041a4c2a72a3d626a034af6dc7b1ac7e1c80af5035d3d600",
+    "supports_action_evidence": false,
+    "upstream_revision": "b04bf6e245577d0a024ea37cc02f4187ca7b0ffc"
+  },
+  "outputs": {
+    "csv": {
+      "path": "results/local_openmemory_vllm_v10.csv",
+      "sha256": "758908477213baaddb5a4eff0619789d53b420bf2fd240e2feaf57593be0f2b3"
+    },
+    "markdown": {
+      "path": "results/local_openmemory_vllm_v10.md",
+      "sha256": "4ea26c327c44be8fa286435a49ed67733719d63c0792899e162d90a136080fc8"
+    }
+  },
+  "schema_version": 1,
+  "source_commit": "a871bf57569ff84621d6dcec3bfffe320ece7741",
+  "title": "Real OpenMemory SDK v10 generalization diagnostic \u2014 not a hypothesis test"
+}

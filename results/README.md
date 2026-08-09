@@ -200,6 +200,17 @@ causal evidence. The [CSV](local_openmemory_vllm_v9.csv), raw run, and
 [provenance sidecar](local_openmemory_vllm_v9.provenance.json) bind the exact
 prospective result.
 
+The larger [real-SDK v10 generalization diagnostic](local_openmemory_vllm_v10.md)
+then doubled the fresh matrix to 12 cases and 24 paired calls. Retrieval and
+cleanup were 12/12, every structured call was accepted, and recall exact
+accuracy reached 10/12 versus 4/12 without recall. Five of six helpful cases
+became exact actions with zero recall-induced safety regressions. The
+[analysis](local_openmemory_vllm_v10_analysis.md) confirms live article-rule
+activation and identifies two remaining deterministic gaps: sparse recalled-
+project composition and negated contrast text leaking into a payload slot. The
+[CSV](local_openmemory_vllm_v10.csv), tracked raw run, and
+[provenance sidecar](local_openmemory_vllm_v10.provenance.json) bind the result.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
