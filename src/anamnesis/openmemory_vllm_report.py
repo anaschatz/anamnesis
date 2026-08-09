@@ -7,6 +7,7 @@ import csv
 import hashlib
 import io
 import json
+import subprocess
 from pathlib import Path
 
 from anamnesis.openmemory_diagnostic import (
@@ -25,7 +26,6 @@ from anamnesis.openmemory_vllm_run import (
     REPO_ROOT,
     OpenMemoryVllmV4Run,
     _load_frozen_inputs,
-    _verify_source_commit,
 )
 from anamnesis.runner import DecisionRequest
 from anamnesis.vllm_runtime import canonical_json_sha256
@@ -37,9 +37,51 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _verify_reporting_checkout(measurement_commit: str) -> str:
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    if status:
+        raise ValueError("v4 report requires a clean worktree")
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", measurement_commit, head],
+        cwd=REPO_ROOT,
+        check=False,
+    )
+    if ancestor.returncode != 0:
+        raise ValueError("measurement commit is not an ancestor of reporter HEAD")
+    changed = set(
+        subprocess.run(
+            ["git", "diff", "--name-only", f"{measurement_commit}..{head}"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+    )
+    allowed = {
+        "src/anamnesis/openmemory_vllm_report.py",
+        "tests/test_openmemory_vllm_run.py",
+    }
+    if not changed <= allowed:
+        raise ValueError("measurement inputs changed after the frozen v4 run")
+    return head
+
+
 def _validate_run(path: Path) -> OpenMemoryVllmV4Run:
     result = OpenMemoryVllmV4Run.model_validate_json(path.read_text(encoding="utf-8"))
-    _verify_source_commit(REPO_ROOT, result.source_commit)
+    _verify_reporting_checkout(result.source_commit)
     pin, preflight = _load_frozen_inputs()
     if result.pin_sha256 != _sha256(PIN_PATH):
         raise ValueError("run pin hash differs from tracked runtime pin")
@@ -86,10 +128,8 @@ def _validate_run(path: Path) -> OpenMemoryVllmV4Run:
     for audit, request in zip(result.audits, expected_requests, strict=True):
         if audit.request_sha256 != canonical_json_sha256(request):
             raise ValueError("raw request differs from frozen reconstruction")
-        if not audit.validation.accepted and (
-            result.status != "preflight_failed" or audit is not result.audits[0]
-        ):
-            raise ValueError("scenario audit contains an invalid structured call")
+    if result.canary.accepted != result.audits[0].validation.accepted:
+        raise ValueError("canary accepted flag differs from first audit")
     if result.audits[0].raw_completion != result.canary.raw_completion:
         raise ValueError("canary raw completion differs from first audit")
     if result.audits[0].usage != result.canary.usage:
@@ -98,6 +138,8 @@ def _validate_run(path: Path) -> OpenMemoryVllmV4Run:
         for audit, call in zip(result.audits[1:], result.paired_run.calls, strict=True):
             if audit.raw_completion != call.raw_completion or audit.usage != call.usage:
                 raise ValueError("paired call differs from its raw audit")
+            if audit.validation.accepted == call.parse_error:
+                raise ValueError("paired parse status differs from its raw audit")
     return result
 
 
@@ -115,6 +157,9 @@ def _row(result: OpenMemoryVllmV4Run) -> dict[str, object]:
         "recall_false_actions": metrics.recall_false_actions if metrics else 0,
         "recall_evidence_contaminations": (
             metrics.recall_evidence_contaminations if metrics else 0
+        ),
+        "structured_invalid_calls": sum(
+            not audit.validation.accepted for audit in result.audits[1:]
         ),
         "setup_input_tokens": result.setup_usage.input_tokens,
         "setup_output_tokens": result.setup_usage.output_tokens,
@@ -156,6 +201,7 @@ unmeasured; provider API cost is exactly `${row["provider_api_cost_usd"]}`.
 | No-hit regressions | {row["no_hit_regressions"]} |
 | Recall false actions | {row["recall_false_actions"]} |
 | Recall evidence contaminations | {row["recall_evidence_contaminations"]} |
+| Structured-invalid scenario calls | {row["structured_invalid_calls"]} |
 | Setup tokens (input/output, excluded) | {setup_tokens} |
 | Headline tokens (input/output) | {headline_tokens} |
 
@@ -200,6 +246,7 @@ def write_report(
     if len(targets) != 3 or targets & sources:
         raise ValueError("report output collides with an input or another output")
     result = _validate_run(run_path)
+    reporter_commit = _verify_reporting_checkout(result.source_commit)
     row = _row(result)
     csv_data = _csv_bytes(row)
     markdown_data = _markdown_bytes(row)
@@ -207,7 +254,8 @@ def write_report(
         "schema_version": 1,
         "title": TITLE,
         "hypothesis_test_eligible": False,
-        "source_commit": result.source_commit,
+        "measurement_source_commit": result.source_commit,
+        "reporter_commit": reporter_commit,
         "inputs": {
             "run": {
                 "path": run_path.relative_to(REPO_ROOT).as_posix(),

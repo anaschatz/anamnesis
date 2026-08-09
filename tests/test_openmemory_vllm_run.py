@@ -146,7 +146,9 @@ def test_failed_canary_stops_before_all_scenario_calls(monkeypatch, tmp_path) ->
 
     raw_path = tmp_path / "failed.json"
     raw_path.write_text(result.model_dump_json(), encoding="utf-8")
-    monkeypatch.setattr(report_module, "_verify_source_commit", lambda *args: None)
+    monkeypatch.setattr(
+        report_module, "_verify_reporting_checkout", lambda *args: "b" * 40
+    )
     assert report_module._validate_run(raw_path) == result
 
     tampered = json.loads(raw_path.read_text(encoding="utf-8"))
