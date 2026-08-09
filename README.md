@@ -166,7 +166,13 @@ a fresh caller-supplied snapshot, recalled text is serialized into a separately
 labelled untrusted prompt section, and only the deterministic Anamnesis store
 may commit state or evidence. OpenMemory usage remains deliberately incomplete
 because the upstream interface has no provider-neutral token/cost accounting.
-No live OpenMemory measured run has been made.
+The first complete paired OpenMemory-style recall diagnostic has now run on a
+fresh frozen v2 case set. Recall remained non-authoritative and caused no
+false-action, no-hit, safety, or evidence-contamination regression, but it
+produced zero helpful gains: baseline and recall each scored 4/8. The frozen
+gate therefore failed, and the current prompt/model recall cell is rejected.
+See the [v2 diagnostic record](results/local_openmemory_diagnostic_v2.md) and
+[provenance sidecar](results/local_openmemory_diagnostic_v2.provenance.json).
 These changes define a new future experiment identity; they are not a rerun or
 reinterpretation of W1-W3. A live vLLM cell has not run because the current
 Apple M3 host and frozen Q4_K_M artifacts are not compatible with a faithful

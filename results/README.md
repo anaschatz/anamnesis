@@ -97,6 +97,16 @@ The exact W3-M2-T1 preflight `.eval` is tracked under
 paths but no credentials or API secrets. There is deliberately no T1 scenario
 artifact.
 
+The first complete [OpenMemory-style paired recall diagnostic
+v2](local_openmemory_diagnostic_v2.md) used eight fresh cases frozen before its
+no-thinking transport task. All 16 local model calls completed with no retries,
+parse errors, or provider API cost. Baseline and recall each scored 4/8;
+helpful gain was zero, while all recall safety and evidence-contamination gates
+passed. The overall frozen gate therefore failed. Its
+[provenance sidecar](local_openmemory_diagnostic_v2.provenance.json) pins the
+exact local raw log, which is not published because it includes full prompts
+and local absolute filesystem metadata.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
