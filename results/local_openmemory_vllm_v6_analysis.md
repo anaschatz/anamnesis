@@ -28,3 +28,8 @@ context overrode the stale destination; and the no-hit arm stayed unchanged.
 The measured backend is Anamnesis's OpenMemory-compatible non-authoritative
 boundary over a pinned local FastEmbed index. The upstream Cavira OpenMemory SDK
 was not installed or measured.
+
+After publication, a conservative source-grounded canonicalizer was implemented
+against these failure categories. A post-hoc replay would make all 8 recall
+actions exact, but this is diagnostic evidence only and does not alter the v6
+score. The canonicalizer must be tested prospectively on fresh v7 cases.

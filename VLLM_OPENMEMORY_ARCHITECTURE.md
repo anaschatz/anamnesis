@@ -204,6 +204,23 @@ These corrections are an architecture revision, not a silent mutation of the
 published experiments. Any result using them needs a new preregistered cell,
 clean source commit, v2 contract hash, fresh preflight, and new result identity.
 
+### Post-v6 action canonicalization
+
+The real indexed-memory diagnostic showed that retrieval could supply the
+correct missing value while an otherwise valid action still failed exact
+scoring because the value occupied the wrong optional slot, the subject used a
+generic object, or a redundant slot repeated the subject. The additive
+`immediate-action-canonicalizer.v1` is a conservative post-validator for a
+future cell. It may only move or rewrite values already present in the current
+event or retrieved text, preserves action identity and evidence, leaves
+no-action and noncanonical-provenance decisions untouched, and records every
+change. It never changes the published v4-v6 artifacts.
+
+Applied post hoc to v6 for diagnosis only, it canonicalizes all eight recall
+decisions to their exact expected payloads. That is not a result or promotion:
+prospective evidence requires a separately frozen v7 dataset with the same
+versioned rules and no reuse of v6 cases.
+
 No `pyproject.toml` entry point was added. Launching a vLLM service inside the
 evaluation process would mix dependency installation, model loading and
 inference identity with the measured code. The external deployment must own its
