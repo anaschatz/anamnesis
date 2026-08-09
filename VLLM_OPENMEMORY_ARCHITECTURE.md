@@ -174,7 +174,28 @@ claim it:
   cannot score as exact provenance, and reducer rejection reasons are retained
   in new checkpoint audits; and
 - `InMemoryAnamnesis.validate_delta()` provides the side-effect-free reducer
-  dry-run required by the vLLM gate.
+dry-run required by the vLLM gate.
+
+### Post-v4 schema alignment
+
+The first frozen OpenMemory + vLLM cell showed that grammar enforcement is
+only as strong as the supplied schema: the published v4 `actions` array had no
+upper bound, so six outputs legally repeated an action until `max_tokens`, and
+one additional wire-valid output failed the domain's two-token subject rule.
+
+The additive `VllmAlignedDecisionWire` now moves both discovered invariants
+into the constrained-decoding surface:
+
+- `actions` has `maxItems: 1`; combined with the existing mode validator this
+  permits zero actions for `no_action` and exactly one for `emit`;
+- `payload.subject` must contain at least two lowercase, space-separated tokens
+  using the closed action vocabulary character set; and
+- `VllmOpenMemoryAlignedDecisionModel` binds a separately versioned contract,
+  schema name and schema hash while the published v4 hashes remain byte-stable.
+
+The exact aligned schema compiles under the pinned xgrammar 0.2.4 backend.
+This is an engineering correction, not a post-hoc v4 result. It has no live
+measurement identity until fresh v5 cases are frozen before any evaluation.
 
 These corrections are an architecture revision, not a silent mutation of the
 published experiments. Any result using them needs a new preregistered cell,

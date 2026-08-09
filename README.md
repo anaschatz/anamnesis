@@ -193,6 +193,12 @@ transport failure, and it is not a causal comparison with Ollama. See the
 [strict v4 result](results/local_openmemory_vllm_v4.md),
 [forensic analysis](results/local_openmemory_vllm_v4_analysis.md), and
 [architecture comparison and integration contract](VLLM_OPENMEMORY_ARCHITECTURE.md).
+The discovered mismatch is now fixed additively for the next cell:
+`VllmAlignedDecisionWire` encodes `actions.maxItems=1` and a two-or-more-token
+lowercase subject directly in the JSON Schema, with separate contract/schema
+hashes. The published v4 wire and hashes remain unchanged. This correction has
+passed offline Pydantic and xgrammar compilation tests but has not been run on
+v4; any measured validation requires fresh v5 cases.
 
 Both local latency sets are diagnostic only. In D0, the Ollama server was
 restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap

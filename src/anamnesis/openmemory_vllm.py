@@ -19,7 +19,8 @@ from typing import Literal, Self, cast
 import httpx
 from pydantic import ConfigDict, Field, ValidationError, model_validator
 
-from anamnesis.local_runtime import LocalDecisionWire
+from anamnesis.local_runtime import LocalDecisionWire, LocalProposedActionWire
+from anamnesis.local_wire import LocalPayloadWire
 from anamnesis.openmemory_diagnostic import (
     OPENMEMORY_IMMEDIATE_DECISION_INSTRUCTIONS,
 )
@@ -44,6 +45,8 @@ from anamnesis.vllm_runtime import (
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 VLLM_OPENMEMORY_DECISION_VERSION = "openmemory.vllm-immediate-decision.v1"
 VLLM_OPENMEMORY_SCHEMA_NAME = "anamnesis_openmemory_immediate_decision"
+VLLM_OPENMEMORY_ALIGNED_DECISION_VERSION = "openmemory.vllm-immediate-decision.v2"
+VLLM_OPENMEMORY_ALIGNED_SCHEMA_NAME = "anamnesis_openmemory_single_action_decision"
 VLLM_OPENMEMORY_DATA_BOUNDARY = "\n".join(
     (
         "Transport boundary:",
@@ -69,6 +72,25 @@ class OpenMemoryVllmEnvelope(_FrozenStrictModel):
 
     current_event: ObservableEvent
     retrospective_recall: tuple[str, ...] | None
+
+
+class VllmAlignedPayloadWire(LocalPayloadWire):
+    """Transport payload whose subject already satisfies the domain shape."""
+
+    subject: str = Field(
+        min_length=3,
+        pattern=r"^[a-z0-9][a-z0-9'/-]*(?: [a-z0-9][a-z0-9'/-]*)+$",
+    )
+
+
+class VllmAlignedProposedActionWire(LocalProposedActionWire):
+    payload: VllmAlignedPayloadWire
+
+
+class VllmAlignedDecisionWire(LocalDecisionWire):
+    """Closed no-action-or-exactly-one-action transport envelope."""
+
+    actions: list[VllmAlignedProposedActionWire] = Field(max_length=1)
 
 
 def build_openmemory_vllm_user_envelope(
@@ -111,6 +133,14 @@ def openmemory_vllm_schema_sha256() -> str:
     return canonical_json_sha256(openmemory_vllm_schema())
 
 
+def openmemory_vllm_aligned_schema() -> dict[str, object]:
+    return VllmAlignedDecisionWire.model_json_schema()
+
+
+def openmemory_vllm_aligned_schema_sha256() -> str:
+    return canonical_json_sha256(openmemory_vllm_aligned_schema())
+
+
 def openmemory_vllm_decision_contract() -> str:
     sentinel = ObservableEvent(
         id="<event-id>",
@@ -140,6 +170,39 @@ def openmemory_vllm_decision_contract() -> str:
 
 def openmemory_vllm_decision_contract_sha256() -> str:
     return hashlib.sha256(openmemory_vllm_decision_contract().encode()).hexdigest()
+
+
+def openmemory_vllm_aligned_decision_contract() -> str:
+    sentinel = ObservableEvent(
+        id="<event-id>",
+        at="2000-01-01T00:00:00+00:00",
+        kind="user_message",
+        text="<event-text>",
+    )
+    kwargs = {
+        "now": sentinel.at.isoformat(),
+        "current_event_id": sentinel.id,
+        "context_events": [sentinel],
+        "decision_history": [],
+        "memory_view": None,
+    }
+    return "\n---\n".join(
+        (
+            VLLM_OPENMEMORY_ALIGNED_DECISION_VERSION,
+            VLLM_OPENMEMORY_SYSTEM_MESSAGE,
+            build_openmemory_vllm_user_envelope(**kwargs),
+            build_openmemory_vllm_user_envelope(
+                **kwargs, retrospective_recall=("<recall-text>",)
+            ),
+            openmemory_vllm_aligned_schema_sha256(),
+        )
+    )
+
+
+def openmemory_vllm_aligned_decision_contract_sha256() -> str:
+    return hashlib.sha256(
+        openmemory_vllm_aligned_decision_contract().encode()
+    ).hexdigest()
 
 
 class VllmDecisionRuntimePin(_FrozenStrictModel):
@@ -300,9 +363,14 @@ class HttpOperatorVllmProbe:
         )
 
 
-def build_openmemory_vllm_request(
+def _build_openmemory_vllm_request(
     pin: VllmDecisionRuntimePin,
     request: DecisionRequest,
+    *,
+    contract_sha256: str,
+    schema_sha256: str,
+    schema_name: str,
+    schema: dict[str, object],
 ) -> dict[str, object]:
     try:
         envelope = OpenMemoryVllmEnvelope.model_validate_json(request.prompt)
@@ -312,9 +380,9 @@ def build_openmemory_vllm_request(
         ) from error
     if envelope.current_event != request.event:
         raise VllmConfigurationError("decision request event differs from envelope")
-    if pin.decision_contract_sha256 != openmemory_vllm_decision_contract_sha256():
+    if pin.decision_contract_sha256 != contract_sha256:
         raise VllmConfigurationError("decision contract differs from pin")
-    if pin.response_schema_sha256 != openmemory_vllm_schema_sha256():
+    if pin.response_schema_sha256 != schema_sha256:
         raise VllmConfigurationError("decision schema differs from pin")
     return {
         "model": pin.served_model,
@@ -328,18 +396,54 @@ def build_openmemory_vllm_request(
         "response_format": {
             "type": "json_schema",
             "json_schema": {
-                "name": VLLM_OPENMEMORY_SCHEMA_NAME,
-                "schema": openmemory_vllm_schema(),
+                "name": schema_name,
+                "schema": schema,
             },
         },
         "chat_template_kwargs": {"enable_thinking": False},
     }
 
 
+def build_openmemory_vllm_request(
+    pin: VllmDecisionRuntimePin,
+    request: DecisionRequest,
+) -> dict[str, object]:
+    """Build the byte-stable published v4 request."""
+
+    return _build_openmemory_vllm_request(
+        pin,
+        request,
+        contract_sha256=openmemory_vllm_decision_contract_sha256(),
+        schema_sha256=openmemory_vllm_schema_sha256(),
+        schema_name=VLLM_OPENMEMORY_SCHEMA_NAME,
+        schema=openmemory_vllm_schema(),
+    )
+
+
+def build_openmemory_vllm_aligned_request(
+    pin: VllmDecisionRuntimePin,
+    request: DecisionRequest,
+) -> dict[str, object]:
+    """Build the additive schema-aligned request for a future fresh cell."""
+
+    return _build_openmemory_vllm_request(
+        pin,
+        request,
+        contract_sha256=openmemory_vllm_aligned_decision_contract_sha256(),
+        schema_sha256=openmemory_vllm_aligned_schema_sha256(),
+        schema_name=VLLM_OPENMEMORY_ALIGNED_SCHEMA_NAME,
+        schema=openmemory_vllm_aligned_schema(),
+    )
+
+
 class VllmOpenMemoryDecisionModel:
     """DecisionModel adapter with live attestation before every completion."""
 
     name = "openmemory-vllm-structured-v4"
+    wire_model = LocalDecisionWire
+    request_builder = staticmethod(build_openmemory_vllm_request)
+    contract_sha256 = staticmethod(openmemory_vllm_decision_contract_sha256)
+    schema_sha256 = staticmethod(openmemory_vllm_schema_sha256)
 
     def __init__(
         self,
@@ -358,9 +462,9 @@ class VllmOpenMemoryDecisionModel:
             raise VllmConfigurationError("vLLM client API key differs from pin")
         if client.request_timeout_seconds != pin.request_timeout_seconds:
             raise VllmConfigurationError("vLLM client timeout differs from pin")
-        if pin.decision_contract_sha256 != openmemory_vllm_decision_contract_sha256():
+        if pin.decision_contract_sha256 != self.contract_sha256():
             raise VllmConfigurationError("decision contract differs from pin")
-        if pin.response_schema_sha256 != openmemory_vllm_schema_sha256():
+        if pin.response_schema_sha256 != self.schema_sha256():
             raise VllmConfigurationError("decision schema differs from pin")
         self.pin = pin
         self._artifact_root = Path(artifact_root)
@@ -426,7 +530,7 @@ class VllmOpenMemoryDecisionModel:
 
     async def decide(self, request: DecisionRequest) -> DecisionCall:
         attestation = await self.attest()
-        body = build_openmemory_vllm_request(self.pin, request)
+        body = self.request_builder(self.pin, request)
         request_sha256 = canonical_json_sha256(body)
         started = perf_counter()
         try:
@@ -497,7 +601,7 @@ class VllmOpenMemoryDecisionModel:
                 errors["json"] = f"JSONDecodeError: {error}"
             else:
                 try:
-                    wire = LocalDecisionWire.model_validate(decoded)
+                    wire = self.wire_model.model_validate(decoded)
                     wire_valid = True
                 except ValidationError as error:
                     errors["wire"] = f"ValidationError: {error}"
@@ -572,22 +676,43 @@ class VllmOpenMemoryDecisionModel:
         return decision, usage, raw_completion, validation
 
 
+class VllmOpenMemoryAlignedDecisionModel(VllmOpenMemoryDecisionModel):
+    """Future-cell adapter with schema/domain cardinality alignment."""
+
+    name = "openmemory-vllm-schema-aligned-v5"
+    wire_model = VllmAlignedDecisionWire
+    request_builder = staticmethod(build_openmemory_vllm_aligned_request)
+    contract_sha256 = staticmethod(openmemory_vllm_aligned_decision_contract_sha256)
+    schema_sha256 = staticmethod(openmemory_vllm_aligned_schema_sha256)
+
+
 __all__ = [
     "OpenMemoryVllmEnvelope",
+    "VLLM_OPENMEMORY_ALIGNED_DECISION_VERSION",
+    "VLLM_OPENMEMORY_ALIGNED_SCHEMA_NAME",
     "VLLM_OPENMEMORY_DATA_BOUNDARY",
     "VLLM_OPENMEMORY_DECISION_VERSION",
     "VLLM_OPENMEMORY_SCHEMA_NAME",
     "VLLM_OPENMEMORY_SYSTEM_MESSAGE",
     "VllmArtifactFilePin",
+    "VllmAlignedDecisionWire",
+    "VllmAlignedPayloadWire",
+    "VllmAlignedProposedActionWire",
     "VllmDecisionAttestation",
     "VllmDecisionAudit",
     "VllmDecisionRuntimePin",
     "VllmDecisionValidation",
     "VllmModelArtifactPin",
+    "VllmOpenMemoryAlignedDecisionModel",
     "VllmOpenMemoryDecisionModel",
     "VllmPackagePin",
+    "build_openmemory_vllm_aligned_request",
     "build_openmemory_vllm_request",
     "build_openmemory_vllm_user_envelope",
+    "openmemory_vllm_aligned_decision_contract",
+    "openmemory_vllm_aligned_decision_contract_sha256",
+    "openmemory_vllm_aligned_schema",
+    "openmemory_vllm_aligned_schema_sha256",
     "openmemory_vllm_decision_contract",
     "openmemory_vllm_decision_contract_sha256",
     "openmemory_vllm_schema",
