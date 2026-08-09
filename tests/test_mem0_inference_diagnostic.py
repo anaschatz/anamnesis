@@ -21,6 +21,11 @@ from anamnesis.mem0_inference_diagnostic import (
 )
 
 
+def test_runtime_source_attests_resident_context_length() -> None:
+    source = Path("src/anamnesis/mem0_inference_diagnostic.py").read_text()
+    assert 'resident[0].get("context_length") != model["context_length"]' in source
+
+
 @pytest.mark.parametrize(
     ("assertion", "memories", "expected"),
     [

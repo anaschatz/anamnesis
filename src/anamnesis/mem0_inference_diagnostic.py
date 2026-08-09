@@ -289,6 +289,8 @@ def _attest_server(protocol: Mapping[str, Any], *, require_resident: bool) -> st
         digest = resident[0].get("digest")
         if digest != model["manifest_sha256"]:
             raise RuntimeError("resident Ollama model digest drifted")
+        if resident[0].get("context_length") != model["context_length"]:
+            raise RuntimeError("resident Ollama context length drifted")
     return str(version["version"])
 
 
