@@ -47,6 +47,7 @@ VLLM_METAL_MULTIMODAL_MODE=text-only-compat \
   --served-model-name anamnesis-openmemory-v4 \
   --api-key local-v4-loopback-20260809 \
   --generation-config vllm --max-model-len 4096 --max-num-seqs 1 \
+  --structured-outputs-config '{"backend":"xgrammar"}' \
   --no-enable-log-outputs --no-enable-log-deltas
 ```
 
