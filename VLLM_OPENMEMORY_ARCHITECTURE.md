@@ -194,8 +194,11 @@ into the constrained-decoding surface:
   schema name and schema hash while the published v4 hashes remain byte-stable.
 
 The exact aligned schema compiles under the pinned xgrammar 0.2.4 backend.
-This is an engineering correction, not a post-hoc v4 result. It has no live
-measurement identity until fresh v5 cases are frozen before any evaluation.
+This is an engineering correction, not a post-hoc v4 result. A separately
+frozen two-call v5 compatibility cell has now exercised it once: the constrained
+`emit` and `no_action` outputs both passed every structural and semantic gate.
+That result validates the schema/runtime boundary but does not measure recall
+quality or reopen the frozen v4 cases.
 
 These corrections are an architecture revision, not a silent mutation of the
 published experiments. Any result using them needs a new preregistered cell,

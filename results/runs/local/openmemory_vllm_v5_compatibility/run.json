@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "purpose": "openmemory_vllm_v5_schema_alignment_compatibility",
+  "hypothesis_test_eligible": false,
+  "source_commit": "e7e89e2992712246b24d520a4f86f32ccf7902cd",
+  "fixture_sha256": "fe3bdd57dfc51bbd374d81ded6ff6cbd4ba535e08595be39f5ad857bf1e923a0",
+  "pin_sha256": "9de634f8806d295d6b6adad340bf23cdd874ae1c367d10d963144f881cdf6b5a",
+  "cases": [
+    {
+      "case_id": "omv5_emit_cobalt_sheet",
+      "expected_mode": "emit",
+      "prompt_sha256": "0d5e933f86d85ee0d0723244ecf94badce1606b5f515cff1b0dfae0c89c1e8bd",
+      "decision": {
+        "actions": [
+          {
+            "kind": "reminder",
+            "action_key": "omv5_event_cobalt_sheet",
+            "payload": {
+              "subject": "archive cobalt inspection sheet"
+            },
+            "summary": "Archived cobalt inspection sheet per user instruction.",
+            "evidence_event_ids": [
+              "omv5_event_cobalt_sheet"
+            ]
+          }
+        ]
+      },
+      "usage": {
+        "input_tokens": 458,
+        "uncached_input_tokens": 458,
+        "cache_read_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 113,
+        "embedding_inputs": 0,
+        "embedding_characters": 0,
+        "cost_usd": 0.0
+      },
+      "latency_ms": 31552.913624967914,
+      "raw_completion": "{\n  \"mode\": \"emit\",\n  \"actions\": [\n    {\n      \"action_key\": \"omv5_event_cobalt_sheet\",\n      \"payload\": {\n        \"subject\": \"archive cobalt inspection sheet\"\n      }\n   \n  \t,\n  \"summary\": \"Archived cobalt inspection sheet per user instruction.\"\n \t,\n  \"evidence_event_ids\": [\n    \"omv5_event_cobalt_sheet\"\n  ]\n}\n]\n}",
+      "audit": {
+        "attestation": {
+          "base_url": "http://127.0.0.1:18001/v1",
+          "served_model": "anamnesis-openmemory-v5",
+          "vllm_server_version": "0.22.0",
+          "artifact_manifest_sha256": "1563d753ccd22c5b0e43dd0aa2a452452d04c2b3cdbf5d10b15187926069db7e",
+          "server_config_sha256": "a1f63dde9a0d1deca80b3914eb9bf7efe788d86d0865574ea7e11892085145e1",
+          "runtime_packages": [
+            {
+              "name": "llguidance",
+              "version": "1.7.6"
+            },
+            {
+              "name": "mlx",
+              "version": "0.31.2"
+            },
+            {
+              "name": "mlx-lm",
+              "version": "0.31.3"
+            },
+            {
+              "name": "mlx-vlm",
+              "version": "0.5.0"
+            },
+            {
+              "name": "openai",
+              "version": "2.53.0"
+            },
+            {
+              "name": "transformers",
+              "version": "5.14.1"
+            },
+            {
+              "name": "vllm",
+              "version": "0.22.0+cpu"
+            },
+            {
+              "name": "vllm-metal",
+              "version": "0.2.0"
+            },
+            {
+              "name": "xgrammar",
+              "version": "0.2.4"
+            }
+          ],
+          "structured_output_backend": "xgrammar",
+          "generation_config": "vllm",
+          "max_model_len": 4096,
+          "max_num_seqs": 1,
+          "speculative_decoding": false
+        },
+        "request_sha256": "5e033986a782b29e6cd0d9bc3262e957957d7fae5c5af6c78810ea8668f10ec5",
+        "raw_completion": "{\n  \"mode\": \"emit\",\n  \"actions\": [\n    {\n      \"action_key\": \"omv5_event_cobalt_sheet\",\n      \"payload\": {\n        \"subject\": \"archive cobalt inspection sheet\"\n      }\n   \n  \t,\n  \"summary\": \"Archived cobalt inspection sheet per user instruction.\"\n \t,\n  \"evidence_event_ids\": [\n    \"omv5_event_cobalt_sheet\"\n  ]\n}\n]\n}",
+        "usage": {
+          "input_tokens": 458,
+          "uncached_input_tokens": 458,
+          "cache_read_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 113,
+          "embedding_inputs": 0,
+          "embedding_characters": 0,
+          "cost_usd": 0.0
+        },
+        "latency_ms": 31552.913624967914,
+        "validation": {
+          "response_model_valid": true,
+          "envelope_valid": true,
+          "finish_reason": "stop",
+          "finish_reason_valid": true,
+          "json_valid": true,
+          "wire_valid": true,
+          "domain_valid": true,
+          "usage_valid": true,
+          "accepted": true,
+          "error_stage": null,
+          "error": null
+        }
+      },
+      "semantic_passed": true
+    },
+    {
+      "case_id": "omv5_no_action_courtyard",
+      "expected_mode": "no_action",
+      "prompt_sha256": "d1ac50a6dbcb27a038de957a3c550b5aabdb5793c161f1323ca91e7baa181f07",
+      "decision": {
+        "actions": []
+      },
+      "usage": {
+        "input_tokens": 455,
+        "uncached_input_tokens": 455,
+        "cache_read_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 19,
+        "embedding_inputs": 0,
+        "embedding_characters": 0,
+        "cost_usd": 0.0
+      },
+      "latency_ms": 6006.458457966801,
+      "raw_completion": "{\n  \"mode\": \"no_action\",\n  \"actions\": []\n}",
+      "audit": {
+        "attestation": {
+          "base_url": "http://127.0.0.1:18001/v1",
+          "served_model": "anamnesis-openmemory-v5",
+          "vllm_server_version": "0.22.0",
+          "artifact_manifest_sha256": "1563d753ccd22c5b0e43dd0aa2a452452d04c2b3cdbf5d10b15187926069db7e",
+          "server_config_sha256": "a1f63dde9a0d1deca80b3914eb9bf7efe788d86d0865574ea7e11892085145e1",
+          "runtime_packages": [
+            {
+              "name": "llguidance",
+              "version": "1.7.6"
+            },
+            {
+              "name": "mlx",
+              "version": "0.31.2"
+            },
+            {
+              "name": "mlx-lm",
+              "version": "0.31.3"
+            },
+            {
+              "name": "mlx-vlm",
+              "version": "0.5.0"
+            },
+            {
+              "name": "openai",
+              "version": "2.53.0"
+            },
+            {
+              "name": "transformers",
+              "version": "5.14.1"
+            },
+            {
+              "name": "vllm",
+              "version": "0.22.0+cpu"
+            },
+            {
+              "name": "vllm-metal",
+              "version": "0.2.0"
+            },
+            {
+              "name": "xgrammar",
+              "version": "0.2.4"
+            }
+          ],
+          "structured_output_backend": "xgrammar",
+          "generation_config": "vllm",
+          "max_model_len": 4096,
+          "max_num_seqs": 1,
+          "speculative_decoding": false
+        },
+        "request_sha256": "342aeae03b84a577061fd8a4648aea0ea30c0832378dacb1c0baf1ddb0ae5751",
+        "raw_completion": "{\n  \"mode\": \"no_action\",\n  \"actions\": []\n}",
+        "usage": {
+          "input_tokens": 455,
+          "uncached_input_tokens": 455,
+          "cache_read_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 19,
+          "embedding_inputs": 0,
+          "embedding_characters": 0,
+          "cost_usd": 0.0
+        },
+        "latency_ms": 6006.458457966801,
+        "validation": {
+          "response_model_valid": true,
+          "envelope_valid": true,
+          "finish_reason": "stop",
+          "finish_reason_valid": true,
+          "json_valid": true,
+          "wire_valid": true,
+          "domain_valid": true,
+          "usage_valid": true,
+          "accepted": true,
+          "error_stage": null,
+          "error": null
+        }
+      },
+      "semantic_passed": true
+    }
+  ],
+  "usage": {
+    "input_tokens": 913,
+    "uncached_input_tokens": 913,
+    "cache_read_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 132,
+    "embedding_inputs": 0,
+    "embedding_characters": 0,
+    "cost_usd": 0.0
+  },
+  "passed": true
+}

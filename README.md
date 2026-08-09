@@ -197,8 +197,13 @@ The discovered mismatch is now fixed additively for the next cell:
 `VllmAlignedDecisionWire` encodes `actions.maxItems=1` and a two-or-more-token
 lowercase subject directly in the JSON Schema, with separate contract/schema
 hashes. The published v4 wire and hashes remain unchanged. This correction has
-passed offline Pydantic and xgrammar compilation tests but has not been run on
-v4; any measured validation requires fresh v5 cases.
+now passed its one authorized, fresh two-call v5 compatibility gate: both the
+`emit` and `no_action` cases finished normally and passed JSON, wire, domain,
+usage, and semantic validation. The run used 913 input and 132 output tokens
+at `$0.00` provider API cost. This establishes schema compatibility only; it is
+not a v4 rerun, recall-quality result, or hypothesis test. See the
+[strict v5 record](results/local_openmemory_vllm_v5.md) and
+[provenance sidecar](results/local_openmemory_vllm_v5.provenance.json).
 
 Both local latency sets are diagnostic only. In D0, the Ollama server was
 restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap

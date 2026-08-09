@@ -132,6 +132,16 @@ tracked 17-call raw artifact. V4 identifies a JSON-Schema-to-domain alignment
 gap; it is not a causal comparison with Ollama and cannot be rerun or repaired
 on the same cases.
 
+The additive [v5 schema-compatibility gate](local_openmemory_vllm_v5.md) then
+tested the corrected closed schema on two fresh cases frozen before execution.
+Both calls finished with `stop` and passed JSON, wire, domain, usage, and
+semantic validation: one exact `emit` and one exact `no_action`. Usage was 913
+input and 132 output tokens at `$0.00` provider API cost. Its
+[CSV](local_openmemory_vllm_v5.csv) and
+[provenance sidecar](local_openmemory_vllm_v5.provenance.json) bind the exact
+tracked raw run. This validates the schema correction only; it is not a v4
+rerun, a recall-quality measurement, or a hypothesis test.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
