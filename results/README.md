@@ -187,6 +187,19 @@ subject, redundant item, and duplicate location-slot normalization defects. The
 exact raw run is published under `results/runs/local/openmemory_vllm_v8/` and
 bound by the [provenance sidecar](local_openmemory_vllm_v8.provenance.json).
 
+The subsequent [real-SDK v9 canonicalizer-v2 diagnostic](local_openmemory_vllm_v9.md)
+preserved the frozen v1 implementation and tested an additive deterministic v2
+on six new paired cases. Retrieval and scoped cleanup were 6/6, all 12 calls
+were accepted, and exact accuracy improved from 2/6 without recall to 6/6 with
+recall. All three helpful opportunities became exact actions with zero
+recall-induced safety regressions. The
+[analysis](local_openmemory_vllm_v9_analysis.md) records that live output
+exercised the recalled-project composition rule, while duplicate-location and
+article rules remained deterministic-test evidence rather than separate live
+causal evidence. The [CSV](local_openmemory_vllm_v9.csv), raw run, and
+[provenance sidecar](local_openmemory_vllm_v9.provenance.json) bind the exact
+prospective result.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
