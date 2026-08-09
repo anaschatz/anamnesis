@@ -1,4 +1,5 @@
 from anamnesis.action_canonicalizer import canonicalize_immediate_decision
+from anamnesis.action_canonicalizer_v2 import canonicalize_immediate_decision_v2
 from anamnesis.schema import Decision, ObservableEvent, ProposedAction
 
 
@@ -101,3 +102,102 @@ def test_no_action_and_wrong_provenance_are_unchanged() -> None:
         event=event, retrospective_recall=(), decision=wrong
     )
     assert result.decision == wrong
+
+
+def test_drops_only_event_grounded_location_that_duplicates_recipient() -> None:
+    event = _event("Act now: send the lens inventory to Aurora Workshop.")
+    duplicate = canonicalize_immediate_decision_v2(
+        event=event,
+        retrospective_recall=(),
+        decision=_decision(
+            {
+                "subject": "send lens inventory",
+                "recipient": "Aurora Workshop",
+                "room": "Aurora Workshop",
+            }
+        ),
+    )
+    assert duplicate.decision.actions[0].payload == {
+        "subject": "send lens inventory",
+        "recipient": "Aurora Workshop",
+    }
+
+    distinct = canonicalize_immediate_decision_v2(
+        event=event,
+        retrospective_recall=(),
+        decision=_decision(
+            {
+                "subject": "send lens inventory",
+                "recipient": "Aurora Workshop",
+                "room": "Bench 7",
+            }
+        ),
+    )
+    assert distinct.decision.actions[0].payload["room"] == "Bench 7"
+
+
+def test_removes_simple_article_only_from_event_quoted_imperative() -> None:
+    event = _event("Act now: photograph the archive seals.")
+    result = canonicalize_immediate_decision_v2(
+        event=event,
+        retrospective_recall=(),
+        decision=_decision({"subject": "photograph the archive seals"}),
+    )
+    assert result.decision.actions[0].payload == {"subject": "photograph archive seals"}
+
+    ungrounded = canonicalize_immediate_decision_v2(
+        event=_event("Act now: photograph archive seals."),
+        retrospective_recall=(),
+        decision=_decision({"subject": "photograph the archive seals"}),
+    )
+    assert ungrounded.decision.actions[0].payload["subject"] == (
+        "photograph the archive seals"
+    )
+
+
+def test_composes_generic_upload_subject_only_with_recalled_project() -> None:
+    event = _event("Act now: upload the field summary for my mountain lichen survey.")
+    result = canonicalize_immediate_decision_v2(
+        event=event,
+        retrospective_recall=("The mountain lichen project is Silver Ridge.",),
+        decision=_decision(
+            {
+                "subject": "upload field summary",
+                "item": "mountain lichen survey",
+                "project": "Silver Ridge",
+            }
+        ),
+    )
+    assert result.decision.actions[0].payload == {
+        "subject": "upload mountain lichen field summary",
+        "project": "Silver Ridge",
+    }
+
+    no_recall = canonicalize_immediate_decision_v2(
+        event=event,
+        retrospective_recall=(),
+        decision=_decision(
+            {
+                "subject": "upload field summary",
+                "item": "mountain lichen survey",
+                "project": "Silver Ridge",
+            }
+        ),
+    )
+    assert no_recall.decision.actions[0].payload["subject"] == "upload field summary"
+
+
+def test_v2_canonicalization_is_idempotent() -> None:
+    event = _event("Act now: scan the conservation tags.")
+    first = canonicalize_immediate_decision_v2(
+        event=event,
+        retrospective_recall=(),
+        decision=_decision({"subject": "scan the conservation tags"}),
+    )
+    second = canonicalize_immediate_decision_v2(
+        event=event,
+        retrospective_recall=(),
+        decision=first.decision,
+    )
+    assert second.decision == first.decision
+    assert second.changes == ()
