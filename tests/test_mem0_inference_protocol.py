@@ -38,6 +38,9 @@ def test_protocol_pins_exact_free_local_runtime() -> None:
     assert model["base_url"] == "http://127.0.0.1:11434"
     assert model["seed"] == 101
     assert model["temperature"] == 0.0
+    assert model["thinking"] is False
+    assert model["json_mode"] is True
+    assert model["expected_model_calls"] == 7
     assert model["retries"] == model["repairs"] == 0
     assert model["cache"] is False
     assert value["storage"]["provider_api_cost_usd"] == 0.0
@@ -77,5 +80,5 @@ def test_inputs_are_fresh_and_do_not_reuse_prior_smoke_entities() -> None:
 
 def test_protocol_bytes_have_stable_identity() -> None:
     assert hashlib.sha256(PROTOCOL.read_bytes()).hexdigest() == (
-        "186de24fc4f4719c1b78c9578a8f1bb583514459973c90108ad5c081d5b425be"
+        "c2b02350e56191b12028e078d65affdbfe5339c53beab65d7996ec5c01bc08f3"
     )

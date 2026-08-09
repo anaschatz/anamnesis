@@ -13,6 +13,9 @@ extraction and update prompts are used unchanged. A small Anamnesis transport
 shim only pins local Ollama request settings and records prompts, responses,
 tokens, finish state, and latency.
 
+Mem0 `v2.0.17` uses its additive v3 pipeline here: one JSON extraction call per
+event, seven calls total. Thinking is disabled; this is not a hidden extra call.
+
 Seven events exercise:
 
 1. profile fact extraction;
