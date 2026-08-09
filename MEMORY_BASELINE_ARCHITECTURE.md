@@ -44,6 +44,28 @@ Anamnesis reporter compare normalized outputs on one newly frozen dataset. The
 simplest architecture that wins the relevant Anamnesis metrics is the promotion
 candidate; feature count is not a success criterion.
 
+## First real Mem0 integration result
+
+The first provider cell uses the official Mem0 `v2.0.17` source at commit
+`12c47f524935692e27ad48d829f35fa1e4417181`, installed only in a separate
+environment. The tracked pin binds its Python source tree and upstream
+`pyproject.toml`, all material runtime package versions, and the existing
+byte-pinned FastEmbed `bge-small-en-v1.5` artifact. Mem0 runs with embedded
+Qdrant, telemetry disabled, a Python socket guard, and no provider API access.
+
+The real SDK smoke passed `add -> scoped dense-vector search -> update ->
+search -> delete -> empty-scope verification`. The Anamnesis adapter hydrated
+every provider result before trusting it, retained Mem0 identifiers only behind
+process-local opaque handles, and emitted no action evidence. The immutable
+result is [`results/mem0_sdk_smoke.v1.json`](results/mem0_sdk_smoke.v1.json).
+
+This is intentionally a storage/retrieval contract result with `infer=false`.
+It does **not** claim that Mem0's automatic fact extraction or automatic
+deduplication works on the Anamnesis benchmark. Those features require a second,
+separately preregistered cell with a pinned local writer model; combining them
+with the SDK plumbing test would hide whether failures came from storage,
+retrieval, or LLM extraction.
+
 ## Why the boundary is strict
 
 Mem0's official examples extract memories from message lists and search them

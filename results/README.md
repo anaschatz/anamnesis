@@ -211,6 +211,14 @@ project composition and negated contrast text leaking into a payload slot. The
 [CSV](local_openmemory_vllm_v10.csv), tracked raw run, and
 [provenance sidecar](local_openmemory_vllm_v10.provenance.json) bind the result.
 
+The separate [real Mem0 SDK storage/retrieval smoke](mem0_sdk_smoke.v1.json)
+passed one local `add -> scoped vector search -> update -> search -> delete ->
+cleanup` lifecycle against official Mem0 `v2.0.17`. It used embedded Qdrant and
+the existing byte-pinned FastEmbed artifact with telemetry and network calls
+blocked. This cell ran with `infer=false`: it validates the adapter, scoping,
+retrieval, update, and cleanup boundary, but does not yet validate Mem0's
+automatic fact extraction or automatic deduplication.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
