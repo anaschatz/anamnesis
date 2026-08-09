@@ -66,6 +66,16 @@ separately preregistered cell with a pinned local writer model; combining them
 with the SDK plumbing test would hide whether failures came from storage,
 retrieval, or LLM extraction.
 
+That second cell was attempted exactly once and stopped on infrastructure
+integrity rather than memory quality. Mem0 completed seven `infer=true` model
+calls, but the runner lost the final artifact at a dual-module Pydantic class
+boundary. Server logs also showed that accumulated Mem0 prompts exceeded the
+effective input budget and were truncated to 4098 tokens despite an
+8192-token resident context. The failure is published in
+[`results/mem0_inference_v1_failure.md`](results/mem0_inference_v1_failure.md).
+The runner defect is fixed, but the same seven events are not eligible for a
+retry; the next cell needs fresh events and a context-fit preflight.
+
 ## Why the boundary is strict
 
 Mem0's official examples extract memories from message lists and search them

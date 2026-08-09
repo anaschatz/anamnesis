@@ -1,0 +1,39 @@
+{
+  "schema_version": "mem0_inference_failure.v1",
+  "protocol_sha256": "7bc9532c599397414ddf856fa3e74dbfdf6039af39b1d7dae3656454261be5d1",
+  "source_commit": "ff5826b7a6e3c861bd658d02ab6c31561e8eb4c5",
+  "attempt": 1,
+  "passed": false,
+  "integrity_passed": false,
+  "semantic_metrics_interpreted": false,
+  "hypothesis_test_eligible": false,
+  "provider_api_cost_usd": 0.0,
+  "external_network_calls": 0,
+  "observed_model_calls": 7,
+  "observed_stop_completions": 7,
+  "result_artifact_written": false,
+  "failure_stage": "result_model_validation",
+  "failure_type": "pydantic_class_identity_mismatch",
+  "failure_summary": "The Mem0 factory imported the transport through its canonical module name while python -m executed the runner as __main__. Seven otherwise valid LlmCallAudit instances therefore had a different Python class identity from the result model's LlmCallAudit type.",
+  "context_observation": {
+    "configured_context_length": 8192,
+    "resident_context_length": 8192,
+    "server_input_limit_observed": 4098,
+    "explicit_truncation_warnings": [
+      {
+        "prompt_tokens_before_truncation": 8374,
+        "prompt_tokens_after_truncation": 4098
+      },
+      {
+        "prompt_tokens_before_truncation": 8419,
+        "prompt_tokens_after_truncation": 4098
+      },
+      {
+        "prompt_tokens_before_truncation": 8220,
+        "prompt_tokens_after_truncation": 4098
+      }
+    ]
+  },
+  "evidence_scope": "The failure and call count come from the retained terminal traceback; truncation values come from the contemporaneous Ollama server terminal. No raw result artifact was written, so event-level memory states and semantic metrics are deliberately not reconstructed or claimed.",
+  "stopping_rule_applied": "Stopped after the single authorized attempt. No retry, repair, prompt change, or second run on the seven v1 events was performed."
+}

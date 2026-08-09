@@ -206,6 +206,27 @@ def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _serialize_llm_calls(calls: Sequence[object]) -> tuple[dict[str, object], ...]:
+    """Cross the Mem0 factory import boundary without relying on class identity.
+
+    ``python -m`` executes this module as ``__main__``, while Mem0's factory imports
+    the configured provider through its canonical package name.  Consequently the
+    two otherwise identical ``LlmCallAudit`` classes have different identities.
+    Revalidate their JSON-compatible data at the result boundary instead.
+    """
+
+    serialized: list[dict[str, object]] = []
+    for call in calls:
+        model_dump = getattr(call, "model_dump", None)
+        if not callable(model_dump):
+            raise TypeError("Mem0 LLM call audit does not support model_dump")
+        value = model_dump(mode="json")
+        if not isinstance(value, dict):
+            raise TypeError("Mem0 LLM call audit did not serialize to an object")
+        serialized.append(value)
+    return tuple(serialized)
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -689,7 +710,7 @@ async def run_mem0_inference_diagnostic(
         scope_isolation_passed=scope_isolation,
         cleanup_passed=cleanup_passed,
         event_results=tuple(events_out),
-        llm_calls=calls,
+        llm_calls=_serialize_llm_calls(calls),
         integrity_error=integrity_error,
     )
 

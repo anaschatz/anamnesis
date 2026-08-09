@@ -219,6 +219,16 @@ blocked. This cell ran with `infer=false`: it validates the adapter, scoping,
 retrieval, update, and cleanup boundary, but does not yet validate Mem0's
 automatic fact extraction or automatic deduplication.
 
+The first preregistered Mem0 `infer=true`
+[automatic-memory diagnostic](mem0_inference_v1_failure.md) then executed all
+seven local extraction calls, but failed at final result serialization because
+the runner and Mem0 factory loaded the same audit model under different Python
+module identities. Its [machine-readable failure
+record](mem0_inference_v1_failure.json) also preserves observed Ollama prompt
+truncation despite an 8192-token resident context. Per the frozen stopping rule,
+no semantic memory metrics are interpreted and the seven v1 cases were not
+rerun.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final

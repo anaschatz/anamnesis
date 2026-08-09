@@ -17,9 +17,39 @@ from anamnesis.mem0_inference_diagnostic import (
     _load_protocol,
     _loopback_only,
     _require_local_environment,
+    _serialize_llm_calls,
     _verify_ollama_artifact,
     evaluate_assertion,
 )
+
+
+def test_llm_call_audits_cross_factory_module_identity_boundary() -> None:
+    class FactoryLoadedAudit:
+        def model_dump(self, *, mode: str) -> dict[str, object]:
+            assert mode == "json"
+            return {
+                "index": 0,
+                "request_sha256": "a" * 64,
+                "response_sha256": "b" * 64,
+                "response_text": '{"memory": []}',
+                "prompt_tokens": 123,
+                "completion_tokens": 7,
+                "latency_ms": 1.5,
+                "done_reason": "stop",
+            }
+
+    assert _serialize_llm_calls((FactoryLoadedAudit(),)) == (
+        {
+            "index": 0,
+            "request_sha256": "a" * 64,
+            "response_sha256": "b" * 64,
+            "response_text": '{"memory": []}',
+            "prompt_tokens": 123,
+            "completion_tokens": 7,
+            "latency_ms": 1.5,
+            "done_reason": "stop",
+        },
+    )
 
 
 def test_runtime_source_attests_resident_context_length() -> None:
