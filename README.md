@@ -218,6 +218,16 @@ normalization errors. See the [strict v6 result](results/local_openmemory_vllm_v
 tests the OpenMemory-compatible architecture using FastEmbed, not the upstream
 Cavira SDK.
 
+The source-grounded canonicalizer was then tested prospectively on six new v7
+cases. Retrieval was 6/6, all 12 constrained calls were accepted, and exact
+accuracy improved from 2/6 without recall to 5/6 with recall. All three helpful
+opportunities became exact actions, with zero safety regressions. The sole miss
+occurred identically in both arms because the model retained an article in an
+otherwise correct subject; it was not a memory failure. See the
+[strict v7 result](results/local_openmemory_vllm_v7.md),
+[analysis](results/local_openmemory_vllm_v7_analysis.md), and
+[provenance sidecar](results/local_openmemory_vllm_v7.provenance.json).
+
 Both local latency sets are diagnostic only. In D0, the Ollama server was
 restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap
 pressure. In D1, all four tasks stayed in one process, whose prompt cache grew

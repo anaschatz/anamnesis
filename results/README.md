@@ -154,6 +154,17 @@ cases, but three failed strict canonical payload normalization. Its
 raw run. The backend is the OpenMemory-compatible Anamnesis boundary over the
 pinned local FastEmbed index, not the upstream Cavira SDK.
 
+The fresh [v7 prospective canonicalizer diagnostic](local_openmemory_vllm_v7.md)
+validated the post-v6 architecture revision on six new cases. Retrieval was
+6/6, exact accuracy improved from 2/6 to 5/6, all three helpful opportunities
+became exact actions, and there were zero safety regressions across 12/12
+accepted structured calls. The [analysis](local_openmemory_vllm_v7_analysis.md)
+documents the single common no-hit failure, which was an article-normalization
+error in both arms rather than a memory regression. The
+[CSV](local_openmemory_vllm_v7.csv) and
+[provenance sidecar](local_openmemory_vllm_v7.provenance.json) bind the tracked
+raw run.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
