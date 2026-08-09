@@ -205,6 +205,19 @@ not a v4 rerun, recall-quality result, or hypothesis test. See the
 [strict v5 record](results/local_openmemory_vllm_v5.md) and
 [provenance sidecar](results/local_openmemory_vllm_v5.provenance.json).
 
+A subsequent real indexed-memory cell replaced fixture-injected hits with
+runtime add/embed/search operations through the non-authoritative OpenMemory
+boundary. The pinned local index retrieved the intended record in 8/8 cases;
+all 16 paired vLLM calls were accepted; exact accuracy improved from 3/8 without
+recall to 4/8 with recall; and there were no safety regressions. Recall supplied
+the intended missing value in all four helpful cases, but only one produced the
+exact canonical action—the other three exposed payload-slot or subject
+normalization errors. See the [strict v6 result](results/local_openmemory_vllm_v6.md),
+[analysis](results/local_openmemory_vllm_v6_analysis.md), and
+[provenance sidecar](results/local_openmemory_vllm_v6.provenance.json). This
+tests the OpenMemory-compatible architecture using FastEmbed, not the upstream
+Cavira SDK.
+
 Both local latency sets are diagnostic only. In D0, the Ollama server was
 restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap
 pressure. In D1, all four tasks stayed in one process, whose prompt cache grew

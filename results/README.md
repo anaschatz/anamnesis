@@ -142,6 +142,18 @@ input and 132 output tokens at `$0.00` provider API cost. Its
 tracked raw run. This validates the schema correction only; it is not a v4
 rerun, a recall-quality measurement, or a hypothesis test.
 
+The [v6 real indexed-memory diagnostic](local_openmemory_vllm_v6.md) then
+stored and searched memory records at runtime rather than passing preselected
+hits directly to the model. Retrieval was correct in 8/8 cases, all 16
+structured calls were accepted, exact accuracy improved from 3/8 to 4/8, and
+there were zero safety regressions. The [analysis](local_openmemory_vllm_v6_analysis.md)
+shows that recall supplied the intended missing value in all four helpful
+cases, but three failed strict canonical payload normalization. Its
+[CSV](local_openmemory_vllm_v6.csv) and
+[provenance sidecar](local_openmemory_vllm_v6.provenance.json) bind the tracked
+raw run. The backend is the OpenMemory-compatible Anamnesis boundary over the
+pinned local FastEmbed index, not the upstream Cavira SDK.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
