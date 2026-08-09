@@ -38,7 +38,7 @@ RecallCaseFamily = Literal[
 class FrozenRecallHit(StrictModel):
     """One reporter-owned hit; its fixture ID never crosses the model boundary."""
 
-    fixture_id: str = Field(pattern=r"^omd[12]_hit_[a-z0-9_]+$")
+    fixture_id: str = Field(pattern=r"^omd[123]_hit_[a-z0-9_]+$")
     content: str = Field(min_length=1, max_length=4096)
     score: float = Field(ge=0.0, le=1.0)
     label: RecallHitLabel
@@ -68,7 +68,7 @@ class OpenMemoryDiagnosticCase(StrictModel):
     """One isolated recall decision with explicit safety/usefulness policy."""
 
     schema_version: Literal[1] = 1
-    id: str = Field(pattern=r"^omd[12]_[a-z0-9_]+$")
+    id: str = Field(pattern=r"^omd[123]_[a-z0-9_]+$")
     family: RecallCaseFamily
     event: ObservableEvent
     hits: tuple[FrozenRecallHit, ...] = ()
@@ -110,6 +110,7 @@ class OpenMemoryDiagnosticArtifact(StrictModel):
     purpose: Literal[
         "openmemory_recall_decision_diagnostic_v1",
         "openmemory_recall_decision_diagnostic_v2",
+        "openmemory_recall_decision_diagnostic_v3",
     ]
     hypothesis_test_eligible: Literal[False] = False
     cases: tuple[OpenMemoryDiagnosticCase, ...] = Field(min_length=1)
