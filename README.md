@@ -241,6 +241,18 @@ requirement, are absent from its declared package dependencies. See the
 [provenance sidecar](results/local_openmemory_sdk_v1.3.0.provenance.json) binds
 the exact source, SDK, runtime, and output bytes.
 
+The next prospective v8 cell replaced the compatible FastEmbed index with that
+actual SDK while keeping the same constrained Qwen3.5 decision stack and
+canonicalizer. The official SDK retrieved the intended record in 6/6 fresh
+cases, every scoped record was verified deleted, and all 12 model calls were
+accepted. Exact accuracy improved from 1/6 without recall to 3/6 with recall:
+two of three helpful opportunities became exact actions, with zero recall-
+induced safety regressions. The third useful retrieval supplied the correct
+project but exposed a remaining subject/item canonicalization gap. See the
+[strict v8 result](results/local_openmemory_vllm_v8.md),
+[forensic analysis](results/local_openmemory_vllm_v8_analysis.md), and
+[provenance sidecar](results/local_openmemory_vllm_v8.provenance.json).
+
 Both local latency sets are diagnostic only. In D0, the Ollama server was
 restarted before Anamnesis to clear an 8+ GiB warm prompt cache after macOS swap
 pressure. In D1, all four tasks stayed in one process, whose prompt cache grew

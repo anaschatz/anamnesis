@@ -176,6 +176,17 @@ source, SDK, runtime, and result bytes. This is SDK compatibility evidence, not
 a recall-quality benchmark; it also records the undeclared upstream dependencies
 needed to make the tagged package runnable.
 
+The fresh [real-SDK v8 prospective diagnostic](local_openmemory_vllm_v8.md)
+then used the official SDK as the actual retrieval backend for six new paired
+decision cases. Retrieval and scoped cleanup were both 6/6, all 12 constrained
+calls were accepted, and exact accuracy improved from 1/6 without recall to 3/6
+with recall. Two of three helpful opportunities became exact actions with no
+recall-induced safety regression. The
+[forensic analysis](local_openmemory_vllm_v8_analysis.md) isolates the remaining
+subject, redundant item, and duplicate location-slot normalization defects. The
+exact raw run is published under `results/runs/local/openmemory_vllm_v8/` and
+bound by the [provenance sidecar](local_openmemory_vllm_v8.provenance.json).
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
