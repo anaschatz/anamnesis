@@ -41,6 +41,7 @@ def test_protocol_pins_exact_free_local_runtime() -> None:
     assert model["thinking"] is False
     assert model["json_mode"] is True
     assert model["expected_model_calls"] == 7
+    assert model["timeout_seconds"] == 180
     assert model["retries"] == model["repairs"] == 0
     assert model["cache"] is False
     assert value["storage"]["provider_api_cost_usd"] == 0.0
@@ -80,5 +81,5 @@ def test_inputs_are_fresh_and_do_not_reuse_prior_smoke_entities() -> None:
 
 def test_protocol_bytes_have_stable_identity() -> None:
     assert hashlib.sha256(PROTOCOL.read_bytes()).hexdigest() == (
-        "c2b02350e56191b12028e078d65affdbfe5339c53beab65d7996ec5c01bc08f3"
+        "7bc9532c599397414ddf856fa3e74dbfdf6039af39b1d7dae3656454261be5d1"
     )

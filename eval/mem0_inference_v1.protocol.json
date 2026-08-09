@@ -24,6 +24,7 @@
     "top_p": 1.0,
     "top_k": 1,
     "max_output_tokens": 1024,
+    "timeout_seconds": 180,
     "thinking": false,
     "json_mode": true,
     "expected_model_calls": 7,
