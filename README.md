@@ -173,6 +173,13 @@ produced zero helpful gains: baseline and recall each scored 4/8. The frozen
 gate therefore failed, and the current prompt/model recall cell is rejected.
 See the [v2 diagnostic record](results/local_openmemory_diagnostic_v2.md) and
 [provenance sidecar](results/local_openmemory_diagnostic_v2.provenance.json).
+The follow-up v3 cell corrected the discovered temporal-reminder versus
+immediate-action prompt mismatch on fresh cases. The model then attempted all
+positive actions and helpful recall resolved the intended recipient/address,
+but 12/16 responses violated the closed response schema. V3 therefore also
+failed, isolating structured-output enforcement as the next bottleneck. See the
+[v3 record](results/local_openmemory_diagnostic_v3.md) and
+[provenance sidecar](results/local_openmemory_diagnostic_v3.provenance.json).
 These changes define a new future experiment identity; they are not a rerun or
 reinterpretation of W1-W3. A live vLLM cell has not run because the current
 Apple M3 host and frozen Q4_K_M artifacts are not compatible with a faithful

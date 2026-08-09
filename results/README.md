@@ -107,6 +107,16 @@ passed. The overall frozen gate therefore failed. Its
 exact local raw log, which is not published because it includes full prompts
 and local absolute filesystem metadata.
 
+The follow-up [OpenMemory immediate-action diagnostic
+v3](local_openmemory_diagnostic_v3.md) corrected the v2 temporal-reminder prompt
+mismatch on eight new cases frozen before treatment. All positive raw outputs
+now attempted `emit`, and helpful recall recovered the intended recipient and
+address, but 12/16 outputs violated the closed response schema. Only 2/8 calls
+per arm were both parse-valid and correct. The frozen gate failed with no
+recall safety or evidence regression. Its
+[provenance sidecar](local_openmemory_diagnostic_v3.provenance.json) pins the
+unpublished raw log and exact source contract.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
