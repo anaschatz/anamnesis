@@ -132,7 +132,7 @@
       "id": "ml3-q1",
       "scope": "a",
       "text": "preferred language for weekly inspection digests",
-      "top_k": 10,
+      "top_k": 2,
       "expected_active_source_event_ids": ["ml3-e2"],
       "required_raw_stale_source_event_ids": ["ml3-e1"]
     },
@@ -140,7 +140,7 @@
       "id": "ml3-q2",
       "scope": "a",
       "text": "Vega archive key return",
-      "top_k": 10,
+      "top_k": 2,
       "expected_active_source_event_ids": [],
       "required_raw_stale_source_event_ids": ["ml3-e3"]
     },
@@ -148,7 +148,7 @@
       "id": "ml3-q3",
       "scope": "a",
       "text": "Project Solstice budget owner",
-      "top_k": 10,
+      "top_k": 1,
       "expected_active_source_event_ids": ["ml3-e5"],
       "required_raw_stale_source_event_ids": []
     },
@@ -156,7 +156,7 @@
       "id": "ml3-q4",
       "scope": "b",
       "text": "preferred language for weekly inspection digests",
-      "top_k": 10,
+      "top_k": 1,
       "expected_active_source_event_ids": ["ml3-e6"],
       "required_raw_stale_source_event_ids": []
     }

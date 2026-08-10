@@ -34,10 +34,11 @@ def test_mem0_lifecycle_v3_directives_are_causal_and_scope_local() -> None:
     assert value["gate"]["raw_stale_recall_opportunities"] == 2
     assert value["gate"]["filtered_query_exact"] == 4
     assert value["gate"]["filtered_stale_hits"] == 0
+    assert [query["top_k"] for query in value["queries"]] == [2, 2, 1, 1]
 
 
 def test_mem0_lifecycle_v3_protocol_bytes_are_pinned() -> None:
     assert (
         hashlib.sha256(PROTOCOL.read_bytes()).hexdigest()
-        == "e645d8fc01fb9c6cb9d2a93a1b48c7fe54d1ac866aec15ea556614fbbb31c970"
+        == "4e9d63ebd6d66b2c76175f94d55262ab74b0045d025297e2f813e07073aaef9a"
     )
