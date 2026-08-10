@@ -238,6 +238,21 @@ records, while one further failure was an ISO-versus-natural-language date
 surface mismatch. The result confirms Mem0's value as a recall baseline but
 rejects it as the authoritative prospective-obligation lifecycle.
 
+The follow-up [Mem0 lifecycle-filter v3 result](mem0_lifecycle_v3.json) kept
+Mem0's extracted records and vector ranking unchanged, then applied an
+Anamnesis-owned deterministic lifecycle projection. The raw candidate sets
+contained both preregistered stale opportunities: the superseded language
+preference and the cancelled archive reminder. The filtered view returned the
+exact active set for all 4/4 queries with zero stale hits, while preserving
+cross-user isolation and cleanup. The byte-exact [raw
+artifact](mem0_lifecycle_v3.raw.json) reports `semantic_passed=false` because
+the first runner counted empty stale-requirement lists via vacuous `all([])`;
+the [analysis](mem0_lifecycle_v3_analysis.md) and machine-readable recomputation
+retain that raw result and correct only this deterministic aggregation bug,
+without a model rerun. This validates the hybrid boundary conditional on
+correct lifecycle directives; automatic extraction of those directives remains
+the next untested component.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final

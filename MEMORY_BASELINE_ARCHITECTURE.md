@@ -86,6 +86,20 @@ architecture boundary: Mem0 can supply non-authoritative recall candidates,
 but Anamnesis must own temporal validity, cancellation, pending obligations,
 and action evidence.
 
+The v3 lifecycle-filter cell tested that boundary directly. Mem0's raw recall
+still exposed the frozen stale records for one correction and one cancellation.
+An Anamnesis-owned deterministic projection then selected the exact active
+record set for all four queries and removed every stale hit. The raw artifact,
+corrected aggregation sidecar, and analysis are published as
+[`results/mem0_lifecycle_v3.raw.json`](results/mem0_lifecycle_v3.raw.json),
+[`results/mem0_lifecycle_v3.json`](results/mem0_lifecycle_v3.json), and
+[`results/mem0_lifecycle_v3_analysis.md`](results/mem0_lifecycle_v3_analysis.md).
+This is evidence for the architecture when lifecycle directives are already
+correct; it is not evidence that Mem0 or the current writer can infer those
+directives automatically. Mem0 remains the extraction/vector-recall layer,
+while Anamnesis remains authoritative for active versions, supersession,
+cancellation, pending obligations, and action evidence.
+
 ## Why the boundary is strict
 
 Mem0's official examples extract memories from message lists and search them

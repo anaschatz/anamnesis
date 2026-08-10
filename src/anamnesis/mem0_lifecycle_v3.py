@@ -124,6 +124,16 @@ def _mapping(value: object, *, operation: str) -> Mapping[str, object]:
     return value
 
 
+def _raw_stale_present(
+    required_source_event_ids: Sequence[str], raw_source_event_ids: Sequence[str]
+) -> bool:
+    """Count only preregistered stale-hit opportunities, never an empty set."""
+
+    return bool(required_source_event_ids) and all(
+        item in raw_source_event_ids for item in required_source_event_ids
+    )
+
+
 def _search_hits(
     memory: object,
     *,
@@ -282,7 +292,7 @@ async def run_mem0_lifecycle_v3(
                     )
                     stale_required = tuple(query["required_raw_stale_source_event_ids"])
                     expected = tuple(query["expected_active_source_event_ids"])
-                    stale_present = all(item in raw_sources for item in stale_required)
+                    stale_present = _raw_stale_present(stale_required, raw_sources)
                     stale_set = set(stale_required)
                     query_results.append(
                         LifecycleQueryResult(

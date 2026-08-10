@@ -1,0 +1,194 @@
+{
+  "schema_version": "mem0_lifecycle_result.v3",
+  "protocol_sha256": "4e9d63ebd6d66b2c76175f94d55262ab74b0045d025297e2f813e07073aaef9a",
+  "source_commit": "a80b2b1ffb546e7907869654060f7c4bfada305f",
+  "passed": false,
+  "integrity_passed": true,
+  "semantic_passed": false,
+  "hypothesis_test_eligible": false,
+  "upstream_revision": "12c47f524935692e27ad48d829f35fa1e4417181",
+  "model_name": "qwen3.5:9b-q4_K_M",
+  "model_manifest_sha256": "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+  "model_blob_sha256": "dec52a44569a2a25341c4e4d3fee25846eed4f6f0b936278e3a3c900bb99d37c",
+  "ollama_version": "0.31.1",
+  "localhost_model_calls": 6,
+  "prompt_tokens": 49784,
+  "completion_tokens": 354,
+  "provider_api_cost_usd": 0.0,
+  "external_network_calls": 0,
+  "all_calls_finished": true,
+  "usage_complete": true,
+  "scope_isolation_passed": true,
+  "cleanup_passed": true,
+  "extracted_records": 6,
+  "raw_stale_recall_opportunities": 4,
+  "filtered_query_exact": 4,
+  "filtered_stale_hits": 0,
+  "query_results": [
+    {
+      "query_id": "ml3-q1",
+      "scope": "a",
+      "raw_source_event_ids": [
+        "ml3-e1",
+        "ml3-e2"
+      ],
+      "filtered_source_event_ids": [
+        "ml3-e2"
+      ],
+      "raw_memories": [
+        "User prefers to receive weekly inspection digests in Italian.",
+        "User updated their preference for weekly inspection digests from Italian to German."
+      ],
+      "filtered_memories": [
+        "User updated their preference for weekly inspection digests from Italian to German."
+      ],
+      "required_raw_stale_source_event_ids": [
+        "ml3-e1"
+      ],
+      "expected_active_source_event_ids": [
+        "ml3-e2"
+      ],
+      "raw_stale_present": true,
+      "filtered_exact": true,
+      "filtered_stale_hits": 0,
+      "search_latency_ms": 10.5714580276981,
+      "filter_latency_ms": 0.008291972335428
+    },
+    {
+      "query_id": "ml3-q2",
+      "scope": "a",
+      "raw_source_event_ids": [
+        "ml3-e3",
+        "ml3-e4"
+      ],
+      "filtered_source_event_ids": [],
+      "raw_memories": [
+        "User needs to return the Vega archive key on February 14, 2045.",
+        "User cancelled the plan to return the Vega archive key on February 14, 2045 and no longer needs to return it."
+      ],
+      "filtered_memories": [],
+      "required_raw_stale_source_event_ids": [
+        "ml3-e3"
+      ],
+      "expected_active_source_event_ids": [],
+      "raw_stale_present": true,
+      "filtered_exact": true,
+      "filtered_stale_hits": 0,
+      "search_latency_ms": 4.188791965134442,
+      "filter_latency_ms": 0.013208016753196716
+    },
+    {
+      "query_id": "ml3-q3",
+      "scope": "a",
+      "raw_source_event_ids": [
+        "ml3-e5"
+      ],
+      "filtered_source_event_ids": [
+        "ml3-e5"
+      ],
+      "raw_memories": [
+        "Mira owns the budget review for Project Solstice."
+      ],
+      "filtered_memories": [
+        "Mira owns the budget review for Project Solstice."
+      ],
+      "required_raw_stale_source_event_ids": [],
+      "expected_active_source_event_ids": [
+        "ml3-e5"
+      ],
+      "raw_stale_present": true,
+      "filtered_exact": true,
+      "filtered_stale_hits": 0,
+      "search_latency_ms": 5.306167004164308,
+      "filter_latency_ms": 0.001500011421740055
+    },
+    {
+      "query_id": "ml3-q4",
+      "scope": "b",
+      "raw_source_event_ids": [
+        "ml3-e6"
+      ],
+      "filtered_source_event_ids": [
+        "ml3-e6"
+      ],
+      "raw_memories": [
+        "User prefers to receive weekly inspection digests in Polish."
+      ],
+      "filtered_memories": [
+        "User prefers to receive weekly inspection digests in Polish."
+      ],
+      "required_raw_stale_source_event_ids": [],
+      "expected_active_source_event_ids": [
+        "ml3-e6"
+      ],
+      "raw_stale_present": true,
+      "filtered_exact": true,
+      "filtered_stale_hits": 0,
+      "search_latency_ms": 3.8695409893989563,
+      "filter_latency_ms": 0.0021249870769679546
+    }
+  ],
+  "llm_calls": [
+    {
+      "index": 0,
+      "request_sha256": "86770311a9b7d36276f146825d2e3bc450a7b58bdcdddaaa000322e0b95abe33",
+      "response_sha256": "d315ccaa268273bc1029173d21c8f8f19f10878bbc72226d998e5bad60f6af29",
+      "response_text": "{\n  \"memory\": [\n    {\n      \"id\": \"0\",\n      \"text\": \"User prefers to receive weekly inspection digests in Italian.\",\n      \"attributed_to\": \"user\"\n    }\n  ]\n}",
+      "prompt_tokens": 8222,
+      "completion_tokens": 54,
+      "latency_ms": 66097.12841600413,
+      "done_reason": "stop"
+    },
+    {
+      "index": 1,
+      "request_sha256": "80af62844b8eaafd2c9f6f53c819084d6a144fc2ae54c33d2190af29d462d060",
+      "response_sha256": "8980f9ad5fb1dca38f97bbb57fc172a2373dc59cba87c8dbc7a97e3225a8d52d",
+      "response_text": "{\n  \"memory\": [\n    {\n      \"id\": \"0\",\n      \"text\": \"User updated their preference for weekly inspection digests from Italian to German.\",\n      \"attributed_to\": \"user\"\n    }\n  ]\n}",
+      "prompt_tokens": 8260,
+      "completion_tokens": 57,
+      "latency_ms": 8631.857624975964,
+      "done_reason": "stop"
+    },
+    {
+      "index": 2,
+      "request_sha256": "87cd6dd6867933f99b76bfef674095b1c98ed6caca3c6f9352b379dac5ac6360",
+      "response_sha256": "6fd7dd13941befe20bed513644620a8ff9941ecdd81fc805b176582d6484ebef",
+      "response_text": "{\n  \"memory\": [\n    {\n      \"id\": \"0\",\n      \"text\": \"User needs to return the Vega archive key on February 14, 2045.\",\n      \"attributed_to\": \"user\"\n    }\n  ]\n}",
+      "prompt_tokens": 8309,
+      "completion_tokens": 63,
+      "latency_ms": 9346.314541005995,
+      "done_reason": "stop"
+    },
+    {
+      "index": 3,
+      "request_sha256": "891892cd7d86b8c5006de94b0f9b778ab4c535a66030bf60797e68e22ed73aa0",
+      "response_sha256": "88c22d16b07b03fb69d1bac1c54531900cfa2a03e01103133c1759cfb5a650a2",
+      "response_text": "{\n  \"memory\": [\n    {\n      \"id\": \"3\",\n      \"text\": \"User cancelled the plan to return the Vega archive key on February 14, 2045 and no longer needs to return it.\",\n      \"attributed_to\": \"user\"\n    }\n  ]\n}",
+      "prompt_tokens": 8359,
+      "completion_tokens": 72,
+      "latency_ms": 10533.106916001998,
+      "done_reason": "stop"
+    },
+    {
+      "index": 4,
+      "request_sha256": "5899c06950f9da3bd164529b62f89d7426200aaa79c44905864a7a6f543368df",
+      "response_sha256": "f6fd1f3d28651eacec64d3ea3238a8a435f67297e632f2422dfe9d3aa4261f08",
+      "response_text": "{\n  \"memory\": [\n    {\n      \"id\": \"4\",\n      \"text\": \"Mira owns the budget review for Project Solstice.\",\n      \"attributed_to\": \"user\"\n    }\n  ]\n}",
+      "prompt_tokens": 8412,
+      "completion_tokens": 54,
+      "latency_ms": 9573.524667008314,
+      "done_reason": "stop"
+    },
+    {
+      "index": 5,
+      "request_sha256": "e4e6abbe0effdd2982cab5026030cf4bf94092e19d37ae583d7cf45b8c0c0425",
+      "response_sha256": "368819e3007eb69b5f5d95ef8aaf760b15e17a0f9164930ebd60a551e6bf14b9",
+      "response_text": "{\n  \"memory\": [\n    {\n      \"id\": \"0\",\n      \"text\": \"User prefers to receive weekly inspection digests in Polish.\",\n      \"attributed_to\": \"user\"\n    }\n  ]\n}",
+      "prompt_tokens": 8222,
+      "completion_tokens": 54,
+      "latency_ms": 8139.042833005078,
+      "done_reason": "stop"
+    }
+  ],
+  "integrity_error": null
+}

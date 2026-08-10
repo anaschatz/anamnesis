@@ -1,0 +1,26 @@
+{
+  "schema_version": "mem0_lifecycle_recomputation.v1",
+  "raw_result_sha256": "2c31620cba59e532b65ea6c646be285539440a2642ed18ccb834afb534187db4",
+  "protocol_sha256": "4e9d63ebd6d66b2c76175f94d55262ab74b0045d025297e2f813e07073aaef9a",
+  "source_commit": "a80b2b1ffb546e7907869654060f7c4bfada305f",
+  "hypothesis_test_eligible": false,
+  "raw_integrity_passed": true,
+  "raw_generated_semantic_passed": false,
+  "recomputed_semantic_passed": true,
+  "recomputation_reason": "The raw runner counted all([]) as a stale-recall opportunity for two queries whose required_raw_stale_source_event_ids were empty. The frozen gate requires only the two nonempty preregistered opportunities.",
+  "model_rerun_performed": false,
+  "raw_stale_recall_opportunities": 2,
+  "raw_stale_query_ids": [
+    "ml3-q1",
+    "ml3-q2"
+  ],
+  "filtered_query_exact": 4,
+  "filtered_stale_hits": 0,
+  "scope_isolation_passed": true,
+  "cleanup_passed": true,
+  "localhost_model_calls": 6,
+  "prompt_tokens": 49784,
+  "completion_tokens": 354,
+  "provider_api_cost_usd": 0.0,
+  "external_network_calls": 0
+}
