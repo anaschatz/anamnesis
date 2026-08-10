@@ -35,6 +35,7 @@ anamnesis-mem0-sdk-smoke = "anamnesis.mem0_sdk_smoke:mem0_sdk_smoke_main"
 anamnesis-mem0-inference = "anamnesis.mem0_inference_diagnostic:mem0_inference_main"
 anamnesis-mem0-inference-v2 = "anamnesis.mem0_inference_diagnostic_v2:mem0_inference_v2_main"
 anamnesis-mem0-lifecycle-v3 = "anamnesis.mem0_lifecycle_v3:mem0_lifecycle_v3_main"
+anamnesis-lifecycle-writer-v4 = "anamnesis.lifecycle_writer_v4:lifecycle_writer_v4_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/anamnesis"]
