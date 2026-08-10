@@ -235,11 +235,16 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _load_protocol(path: Path) -> dict[str, Any]:
-    if _sha256_file(path) != PROTOCOL_SHA256:
+def _load_protocol(
+    path: Path,
+    *,
+    expected_sha256: str = PROTOCOL_SHA256,
+    expected_schema_version: str = PROTOCOL_SCHEMA_VERSION,
+) -> dict[str, Any]:
+    if _sha256_file(path) != expected_sha256:
         raise RuntimeError("Mem0 inference protocol bytes drifted")
     value = json.loads(path.read_text(encoding="utf-8"))
-    if value.get("schema_version") != PROTOCOL_SCHEMA_VERSION:
+    if value.get("schema_version") != expected_schema_version:
         raise RuntimeError("unexpected Mem0 inference protocol schema")
     if value.get("hypothesis_test_eligible") is not False:
         raise RuntimeError("Mem0 inference protocol cannot be hypothesis eligible")
@@ -248,11 +253,11 @@ def _load_protocol(path: Path) -> dict[str, Any]:
     return value
 
 
-def _require_local_environment() -> None:
+def _require_local_environment(*, context_length: int = 8192) -> None:
     expected = {
         "OLLAMA_NO_CLOUD": "1",
         "OLLAMA_HOST": "127.0.0.1:11434",
-        "OLLAMA_CONTEXT_LENGTH": "8192",
+        "OLLAMA_CONTEXT_LENGTH": str(context_length),
         "OLLAMA_NUM_PARALLEL": "1",
         "OLLAMA_MAX_LOADED_MODELS": "1",
     }
@@ -361,6 +366,7 @@ def _construct_memory(
     *,
     embedding_snapshot: Path,
     runtime_root: Path,
+    collection_name: str = "anamnesis_mem0_inference_v1",
 ) -> object:
     os.environ["MEM0_TELEMETRY"] = "False"
     os.environ["MEM0_DIR"] = str(runtime_root / "mem0-home")
@@ -383,7 +389,7 @@ def _construct_memory(
             "vector_store": {
                 "provider": "qdrant",
                 "config": {
-                    "collection_name": "anamnesis_mem0_inference_v1",
+                    "collection_name": collection_name,
                     "embedding_model_dims": 384,
                     "path": str(runtime_root / "qdrant"),
                     "on_disk": True,
@@ -560,9 +566,16 @@ async def run_mem0_inference_diagnostic(
     embedding_snapshot: Path,
     models_root: Path,
     source_commit: str,
+    protocol_sha256: str = PROTOCOL_SHA256,
+    protocol_schema_version: str = PROTOCOL_SCHEMA_VERSION,
+    collection_name: str = "anamnesis_mem0_inference_v1",
 ) -> Mem0InferenceResult:
-    protocol = _load_protocol(protocol_path)
-    _require_local_environment()
+    protocol = _load_protocol(
+        protocol_path,
+        expected_sha256=protocol_sha256,
+        expected_schema_version=protocol_schema_version,
+    )
+    _require_local_environment(context_length=protocol["model"]["context_length"])
     if len(source_commit) != 40:
         raise RuntimeError("Mem0 inference source commit must be full length")
     from anamnesis.baselines import _directory_sha256
@@ -590,6 +603,7 @@ async def run_mem0_inference_diagnostic(
                     protocol,
                     embedding_snapshot=embedding_snapshot,
                     runtime_root=Path(directory),
+                    collection_name=collection_name,
                 )
                 llm = memory.llm
                 for event in protocol["events"]:
@@ -689,7 +703,7 @@ async def run_mem0_inference_diagnostic(
     )
     return Mem0InferenceResult(
         schema_version=RESULT_SCHEMA_VERSION,
-        protocol_sha256=PROTOCOL_SHA256,
+        protocol_sha256=protocol_sha256,
         source_commit=source_commit,
         passed=semantic_passed,
         integrity_passed=integrity_passed,

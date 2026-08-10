@@ -33,6 +33,7 @@ anamnesis-manifest = "anamnesis.manifest_cli:manifest_main"
 anamnesis-openmemory-sdk-smoke = "anamnesis.openmemory_sdk_smoke:openmemory_sdk_smoke_main"
 anamnesis-mem0-sdk-smoke = "anamnesis.mem0_sdk_smoke:mem0_sdk_smoke_main"
 anamnesis-mem0-inference = "anamnesis.mem0_inference_diagnostic:mem0_inference_main"
+anamnesis-mem0-inference-v2 = "anamnesis.mem0_inference_diagnostic_v2:mem0_inference_v2_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/anamnesis"]
