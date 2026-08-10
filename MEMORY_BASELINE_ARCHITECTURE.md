@@ -76,6 +76,16 @@ effective input budget and were truncated to 4098 tokens despite an
 The runner defect is fixed, but the same seven events are not eligible for a
 retry; the next cell needs fresh events and a context-fit preflight.
 
+The fresh v2 cell completed with integrity under a 32768-token context and is
+published in [`results/mem0_inference_v2.json`](results/mem0_inference_v2.json).
+It passed 4/7 frozen event gates: fact extraction, paraphrase deduplication,
+speculation safety, and user/session isolation worked. Correction and
+cancellation did not supersede the old active records; the additive pipeline
+stored both the newer statement and stale state. This directly supports the
+architecture boundary: Mem0 can supply non-authoritative recall candidates,
+but Anamnesis must own temporal validity, cancellation, pending obligations,
+and action evidence.
+
 ## Why the boundary is strict
 
 Mem0's official examples extract memories from message lists and search them

@@ -1,0 +1,232 @@
+{
+  "schema_version": "mem0_inference_result.v1",
+  "protocol_sha256": "e0031a0e9044b02b816afacb2ff1ecf4fe96bd4b26d2b6239d72dc496c3f5f7d",
+  "source_commit": "1b40db587538295500b6fcc3308a09f6ea801c30",
+  "passed": false,
+  "integrity_passed": true,
+  "semantic_passed": false,
+  "hypothesis_test_eligible": false,
+  "upstream_revision": "12c47f524935692e27ad48d829f35fa1e4417181",
+  "model_name": "qwen3.5:9b-q4_K_M",
+  "model_manifest_sha256": "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+  "model_blob_sha256": "dec52a44569a2a25341c4e4d3fee25846eed4f6f0b936278e3a3c900bb99d37c",
+  "ollama_version": "0.31.1",
+  "localhost_model_calls": 7,
+  "prompt_tokens": 58103,
+  "completion_tokens": 373,
+  "provider_api_cost_usd": 0.0,
+  "external_network_calls": 0,
+  "all_calls_finished": true,
+  "usage_complete": true,
+  "scope_isolation_passed": true,
+  "cleanup_passed": true,
+  "event_results": [
+    {
+      "event_id": "mi2-e1",
+      "scope": "a",
+      "sdk_events": [
+        "ADD"
+      ],
+      "record_count": 1,
+      "memories": [
+        "User prefers to receive monthly risk summaries in Spanish."
+      ],
+      "model_call_indexes": [
+        0
+      ],
+      "latency_ms": 69376.95587502094,
+      "assertion_type": "contains_fact",
+      "assertion_passed": true,
+      "assertion_reason": "required fact present"
+    },
+    {
+      "event_id": "mi2-e2",
+      "scope": "a",
+      "sdk_events": [],
+      "record_count": 1,
+      "memories": [
+        "User prefers to receive monthly risk summaries in Spanish."
+      ],
+      "model_call_indexes": [
+        1
+      ],
+      "latency_ms": 5257.207999995444,
+      "assertion_type": "deduplicated_fact",
+      "assertion_passed": true,
+      "assertion_reason": "matching records: 1, expected: 1"
+    },
+    {
+      "event_id": "mi2-e3",
+      "scope": "a",
+      "sdk_events": [
+        "ADD"
+      ],
+      "record_count": 2,
+      "memories": [
+        "User prefers to receive monthly risk summaries in Spanish.",
+        "User updated their preference for monthly risk summaries from Spanish to French, indicating a change in language choice."
+      ],
+      "model_call_indexes": [
+        2
+      ],
+      "latency_ms": 13220.001665991731,
+      "assertion_type": "corrected_fact",
+      "assertion_passed": false,
+      "assertion_reason": "corrected records: 1, stale records: 2"
+    },
+    {
+      "event_id": "mi2-e4",
+      "scope": "a",
+      "sdk_events": [
+        "ADD"
+      ],
+      "record_count": 3,
+      "memories": [
+        "User needs to renew their Lyra access badge on September 12, 2044.",
+        "User prefers to receive monthly risk summaries in Spanish.",
+        "User updated their preference for monthly risk summaries from Spanish to French, indicating a change in language choice."
+      ],
+      "model_call_indexes": [
+        3
+      ],
+      "latency_ms": 15177.138875005767,
+      "assertion_type": "contains_fact",
+      "assertion_passed": false,
+      "assertion_reason": "required fact missing"
+    },
+    {
+      "event_id": "mi2-e5",
+      "scope": "a",
+      "sdk_events": [
+        "ADD"
+      ],
+      "record_count": 4,
+      "memories": [
+        "User cancelled the Lyra access badge renewal that was previously scheduled for September 12, 2044.",
+        "User needs to renew their Lyra access badge on September 12, 2044.",
+        "User prefers to receive monthly risk summaries in Spanish.",
+        "User updated their preference for monthly risk summaries from Spanish to French, indicating a change in language choice."
+      ],
+      "model_call_indexes": [
+        4
+      ],
+      "latency_ms": 18448.39479197981,
+      "assertion_type": "cancelled_or_absent",
+      "assertion_passed": false,
+      "assertion_reason": "stale active obligation records: 1"
+    },
+    {
+      "event_id": "mi2-e6",
+      "scope": "a",
+      "sdk_events": [
+        "ADD"
+      ],
+      "record_count": 5,
+      "memories": [
+        "User cancelled the Lyra access badge renewal that was previously scheduled for September 12, 2044.",
+        "User is considering touring the Indigo Observatory someday as a future activity.",
+        "User needs to renew their Lyra access badge on September 12, 2044.",
+        "User prefers to receive monthly risk summaries in Spanish.",
+        "User updated their preference for monthly risk summaries from Spanish to French, indicating a change in language choice."
+      ],
+      "model_call_indexes": [
+        5
+      ],
+      "latency_ms": 18755.734083999414,
+      "assertion_type": "no_hard_obligation",
+      "assertion_passed": true,
+      "assertion_reason": "hard obligation records: 0"
+    },
+    {
+      "event_id": "mi2-e7",
+      "scope": "b",
+      "sdk_events": [
+        "ADD"
+      ],
+      "record_count": 1,
+      "memories": [
+        "User prefers to receive monthly risk summaries in Korean."
+      ],
+      "model_call_indexes": [
+        6
+      ],
+      "latency_ms": 15824.34687501518,
+      "assertion_type": "contains_fact",
+      "assertion_passed": true,
+      "assertion_reason": "required fact present"
+    }
+  ],
+  "llm_calls": [
+    {
+      "index": 0,
+      "request_sha256": "73e621dd148c30b3c2c99b79002916af1d356c23532f1d6095363c4ecb97a62e",
+      "response_sha256": "264cdf10e4b618d3f21e5ba24bb5d0b9429918ab799a8ed7a64ff29adf9c5ec0",
+      "response_text": "{\n  \"memory\": [\n    {\n      \"id\": \"0\",\n      \"text\": \"User prefers to receive monthly risk summaries in Spanish.\",\n      \"attributed_to\": \"user\"\n    }\n  ]\n}",
+      "prompt_tokens": 8221,
+      "completion_tokens": 53,
+      "latency_ms": 69280.19299998414,
+      "done_reason": "stop"
+    },
+    {
+      "index": 1,
+      "request_sha256": "f328b7b063e86a0dfb5e95477f64732e67c2708ed9ee9fde6007a4155b478e94",
+      "response_sha256": "8891c0ce5dab80bd906315d0f702e9bd9844c32b148310dc7cdccb48344c0923",
+      "response_text": "{\"memory\": []}",
+      "prompt_tokens": 8256,
+      "completion_tokens": 6,
+      "latency_ms": 5246.97862501489,
+      "done_reason": "stop"
+    },
+    {
+      "index": 2,
+      "request_sha256": "efad9473cc92bed877a846bb9b5317bfa0a2c783653f4acedc002203690c35ff",
+      "response_sha256": "b447633716a66a805641dcdce79b02326f5ebd35db4eb1f6a04aa9688549969c",
+      "response_text": "{\n  \"memory\": [\n    {\n      \"id\": \"1\",\n      \"text\": \"User updated their preference for monthly risk summaries from Spanish to French, indicating a change in language choice.\",\n      \"attributed_to\": \"user\",\n      \"linked_memory_ids\": [\"0\"]\n    }\n  ]\n}",
+      "prompt_tokens": 8271,
+      "completion_tokens": 73,
+      "latency_ms": 13179.052457970101,
+      "done_reason": "stop"
+    },
+    {
+      "index": 3,
+      "request_sha256": "6bad39835b6c452a404707177a297554bb977e8d1b63bde448d57bf490b3933d",
+      "response_sha256": "a1a741ed6919879dafc698ffe77ec4486a1135b8b12c9691ebd49d3d904dfaad",
+      "response_text": "{\n  \"memory\": [\n    {\n      \"id\": \"0\",\n      \"text\": \"User needs to renew their Lyra access badge on September 12, 2044.\",\n      \"attributed_to\": \"user\"\n    }\n  ]\n}",
+      "prompt_tokens": 8327,
+      "completion_tokens": 64,
+      "latency_ms": 15153.314249997493,
+      "done_reason": "stop"
+    },
+    {
+      "index": 4,
+      "request_sha256": "0de4ca8a4136746d2589fe6a5d25d5ac7988d48f0af262ff732ce2958c9033d4",
+      "response_sha256": "b37b025f0a4ed412d8cc762d9038406bfd8e9f9cdf271b5c3ca33afa00a7c932",
+      "response_text": "{\n  \"memory\": [\n    {\n      \"id\": \"3\",\n      \"text\": \"User cancelled the Lyra access badge renewal that was previously scheduled for September 12, 2044.\",\n      \"attributed_to\": \"user\"\n    }\n  ]\n}",
+      "prompt_tokens": 8379,
+      "completion_tokens": 67,
+      "latency_ms": 18414.564291015267,
+      "done_reason": "stop"
+    },
+    {
+      "index": 5,
+      "request_sha256": "d24a12961d863d03f6a2a643ec8c5ea3b02feceb08a27b54aa80fea621e037af",
+      "response_sha256": "b8cd0a8c3f4736d5c701e1aea76e7a172e7ff65f50c19bc36e26197c2e581c73",
+      "response_text": "{\n  \"memory\": [\n    {\n      \"id\": \"4\",\n      \"text\": \"User is considering touring the Indigo Observatory someday as a future activity.\",\n      \"attributed_to\": \"user\"\n    }\n  ]\n}",
+      "prompt_tokens": 8428,
+      "completion_tokens": 57,
+      "latency_ms": 18709.683542023413,
+      "done_reason": "stop"
+    },
+    {
+      "index": 6,
+      "request_sha256": "9508977e59fd5c0f3bda098c041320bcc12bb4f63621daab10394a439f49a46b",
+      "response_sha256": "25b7b2d36f497a24c1f9deeed72df73f103c23f293c39f88d92a8319139f3f10",
+      "response_text": "{\n  \"memory\": [\n    {\n      \"id\": \"0\",\n      \"text\": \"User prefers to receive monthly risk summaries in Korean.\",\n      \"attributed_to\": \"user\"\n    }\n  ]\n}",
+      "prompt_tokens": 8221,
+      "completion_tokens": 53,
+      "latency_ms": 15740.723499970045,
+      "done_reason": "stop"
+    }
+  ],
+  "integrity_error": null
+}

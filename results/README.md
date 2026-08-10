@@ -229,6 +229,15 @@ truncation despite an 8192-token resident context. Per the frozen stopping rule,
 no semantic memory metrics are interpreted and the seven v1 cases were not
 rerun.
 
+The fresh [Mem0 automatic-memory v2 result](mem0_inference_v2.json) then ran
+successfully with a 32768-token context and no observed prompt truncation. Its
+[analysis](mem0_inference_v2_analysis.md) reports 4/7 frozen event gates: initial
+extraction, paraphrase deduplication, speculation safety, and cross-user scope
+passed. Correction and cancellation were appended alongside stale active
+records, while one further failure was an ISO-versus-natural-language date
+surface mismatch. The result confirms Mem0's value as a recall baseline but
+rejects it as the authoritative prospective-obligation lifecycle.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final
