@@ -1,0 +1,161 @@
+{
+  "schema_version": "mem0_lifecycle_writer_protocol.v4",
+  "purpose": "automatic_lifecycle_directive_extraction_on_fresh_cases",
+  "hypothesis_test_eligible": false,
+  "preregistered_before_writer_prompt_implementation_and_model_calls": true,
+  "interpretation_boundary": "This cell tests whether a local writer derives lifecycle operations from fresh observable text and the causally prior active-state view. Mem0 extraction and vector retrieval are not rerun.",
+  "model": {
+    "provider": "ollama_local",
+    "name": "qwen3.5:9b-q4_K_M",
+    "manifest_sha256": "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+    "model_blob_sha256": "dec52a44569a2a25341c4e4d3fee25846eed4f6f0b936278e3a3c900bb99d37c",
+    "model_blob_bytes": 6594462816,
+    "ollama_version": "0.31.1",
+    "base_url": "http://127.0.0.1:11434",
+    "context_length": 32768,
+    "seed": 101,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "top_k": 1,
+    "max_output_tokens": 512,
+    "timeout_seconds": 180,
+    "thinking": false,
+    "expected_model_calls": 9,
+    "retries": 0,
+    "repairs": 0,
+    "cache": false
+  },
+  "scopes": ["a", "b"],
+  "events": [
+    {
+      "id": "mw4-e1",
+      "scope": "a",
+      "kind": "profile",
+      "observed_at": "2046-04-01T09:00:00+03:00",
+      "text": "For future field summaries, I prefer a compact bullet list.",
+      "expected": {
+        "operation": "upsert",
+        "key_relation": "new_valid",
+        "supersedes_event_ids": []
+      }
+    },
+    {
+      "id": "mw4-e2",
+      "scope": "a",
+      "kind": "profile",
+      "observed_at": "2046-04-02T10:00:00+03:00",
+      "text": "Change that preference: future field summaries should use detailed paragraphs, not a compact bullet list.",
+      "expected": {
+        "operation": "upsert",
+        "key_relation": "same_as_event",
+        "key_source_event_id": "mw4-e1",
+        "supersedes_event_ids": ["mw4-e1"]
+      }
+    },
+    {
+      "id": "mw4-e3",
+      "scope": "a",
+      "kind": "prospective_obligation",
+      "observed_at": "2046-04-03T11:00:00+03:00",
+      "text": "Please remember that I must deliver the Nimbus access badge on 2046-06-18.",
+      "expected": {
+        "operation": "upsert",
+        "key_relation": "new_valid",
+        "supersedes_event_ids": []
+      }
+    },
+    {
+      "id": "mw4-e4",
+      "scope": "a",
+      "kind": "prospective_obligation",
+      "observed_at": "2046-04-04T12:00:00+03:00",
+      "text": "The Nimbus badge delivery is no longer required. Cancel that obligation.",
+      "expected": {
+        "operation": "cancel",
+        "key_relation": "same_as_event",
+        "key_source_event_id": "mw4-e3",
+        "supersedes_event_ids": ["mw4-e3"]
+      }
+    },
+    {
+      "id": "mw4-e5",
+      "scope": "a",
+      "kind": "project",
+      "observed_at": "2046-04-05T13:00:00+03:00",
+      "text": "Rhea is now responsible for the thermal review in Project Meridian.",
+      "expected": {
+        "operation": "upsert",
+        "key_relation": "new_valid",
+        "supersedes_event_ids": []
+      }
+    },
+    {
+      "id": "mw4-e6",
+      "scope": "a",
+      "kind": "profile",
+      "observed_at": "2046-04-06T14:00:00+03:00",
+      "text": "We might someday consider a cobalt color palette, but that is only brainstorming; do not save it as a preference.",
+      "expected": {
+        "operation": "ignore",
+        "key_relation": "none",
+        "supersedes_event_ids": []
+      }
+    },
+    {
+      "id": "mw4-e7",
+      "scope": "b",
+      "kind": "profile",
+      "observed_at": "2046-04-07T15:00:00+03:00",
+      "text": "For future field summaries, I prefer a numbered checklist.",
+      "expected": {
+        "operation": "upsert",
+        "key_relation": "new_valid",
+        "supersedes_event_ids": []
+      }
+    },
+    {
+      "id": "mw4-e8",
+      "scope": "a",
+      "kind": "prospective_obligation",
+      "observed_at": "2046-04-08T16:00:00+03:00",
+      "text": "I need to renew the Borealis lab permit on 2046-08-03.",
+      "expected": {
+        "operation": "upsert",
+        "key_relation": "new_valid",
+        "supersedes_event_ids": []
+      }
+    },
+    {
+      "id": "mw4-e9",
+      "scope": "a",
+      "kind": "prospective_obligation",
+      "observed_at": "2046-04-09T17:00:00+03:00",
+      "text": "Move the Borealis lab permit renewal to 2046-08-10 instead.",
+      "expected": {
+        "operation": "upsert",
+        "key_relation": "same_as_event",
+        "key_source_event_id": "mw4-e8",
+        "supersedes_event_ids": ["mw4-e8"]
+      }
+    }
+  ],
+  "gate": {
+    "integrity_model_calls": 9,
+    "wire_valid": 9,
+    "directive_exact": 9,
+    "filter_accepts": 8,
+    "ignored": 1,
+    "final_active_source_event_ids": {
+      "a": ["mw4-e2", "mw4-e5", "mw4-e9"],
+      "b": ["mw4-e7"]
+    },
+    "action_evidence_ids": []
+  },
+  "stopping_rule": {
+    "attempts": 1,
+    "on_integrity_failure": "stop_without_interpreting_metrics",
+    "on_valid_result": "publish_all_nine_directives_and_stop",
+    "prompt_tuning_on_v4_events": false,
+    "next_writer_revision_requires_new_events": true
+  }
+}
