@@ -253,6 +253,16 @@ without a model rerun. This validates the hybrid boundary conditional on
 correct lifecycle directives; automatic extraction of those directives remains
 the next untested component.
 
+That remaining boundary was tested once in the fresh [automatic lifecycle
+writer v4 artifact](mem0_lifecycle_writer_v4.raw.json). Integrity passed across
+9/9 local calls, but only 3 outputs were wire-valid, 2 directives were exact,
+and 2 mutations reached the deterministic filter. Six responses violated the
+closed response schema by adding `value` or omitting `source_event_id`; the one
+wire-valid reschedule omitted its causal supersession edge and was correctly
+rejected. The [analysis](mem0_lifecycle_writer_v4_analysis.md) therefore rejects
+the current writer as an authoritative lifecycle source without retuning or a
+second attempt.
+
 Raw Inspect logs belong in the ignored `results/runs/` directory. A strict
 development report requires one complete 3-system × 35-scenario matrix from a
 frozen baseline manifest and is titled “Development baseline — not a final

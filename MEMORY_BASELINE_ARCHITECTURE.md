@@ -100,6 +100,18 @@ directives automatically. Mem0 remains the extraction/vector-recall layer,
 while Anamnesis remains authoritative for active versions, supersession,
 cancellation, pending obligations, and action evidence.
 
+The subsequent automatic-writer v4 cell tested the missing text-to-directive
+boundary on nine fresh events. Its infrastructure integrity passed, but only
+3/9 responses matched the closed wire schema, 2/9 matched the frozen lifecycle
+projection, and 2/8 expected mutations were accepted. The raw result and
+failure analysis are
+[`results/mem0_lifecycle_writer_v4.raw.json`](results/mem0_lifecycle_writer_v4.raw.json)
+and
+[`results/mem0_lifecycle_writer_v4_analysis.md`](results/mem0_lifecycle_writer_v4_analysis.md).
+Consequently model-authored directives remain untrusted proposals. Both wire
+validation and deterministic reducer acceptance are mandatory before they can
+alter authoritative state.
+
 ## Why the boundary is strict
 
 Mem0's official examples extract memories from message lists and search them
